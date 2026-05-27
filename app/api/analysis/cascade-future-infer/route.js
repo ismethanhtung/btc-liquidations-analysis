@@ -485,7 +485,7 @@ export async function POST(req) {
       },
       actions: {
         totalEvaluated: actionRows.length,
-        top: actionRows.slice(0, 20),
+        top: actionRows,
         chosen,
         chosenTradeRealized,
         baseline: {
