@@ -1,0 +1,12 @@
+{
+  "generatedAt": "2026-05-22T05:00:04.968Z",
+  "calls": 8,
+  "stopReason": "stuck_same_oldest_timestamp",
+  "rows": 4320,
+  "targetStart": 1464066001169,
+  "targetEnd": 1779426001169,
+  "first": 1763877600000,
+  "last": 1779426000000,
+  "firstIso": "2025-11-23T06:00:00.000Z",
+  "lastIso": "2026-05-22T05:00:00.000Z"
+}

@@ -19,6 +19,10 @@ out/
 build/
 dist/
 dist-ssr/
+.vercel/
+.turbo/
+.cache/
+*.tsbuildinfo
 
 # Test output
 coverage/

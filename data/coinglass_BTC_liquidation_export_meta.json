@@ -1,0 +1,30 @@
+{
+  "generatedAt": "2026-05-22T04:48:58.639Z",
+  "requested": {
+    "file1": {
+      "range": "10y",
+      "interval": "1h"
+    },
+    "file2": {
+      "range": "5y",
+      "interval": "10m"
+    }
+  },
+  "file1": {
+    "path": "/Users/thanhtung/Downloads/maitech/btc/data/coinglass_BTC_liquidation_10y_1h.csv",
+    "rows": 4320,
+    "first": 1763874000000,
+    "last": 1779422400000,
+    "apiCode": "0",
+    "apiMsg": null
+  },
+  "file2": {
+    "path": "/Users/thanhtung/Downloads/maitech/btc/data/coinglass_BTC_liquidation_5y_10m.csv",
+    "rows": 0,
+    "first": null,
+    "last": null,
+    "apiCode": "403",
+    "apiMsg": "The requested interval is not available for your current API plan.",
+    "note": "Unavailable on current plan. code=403 msg=The requested interval is not available for your current API plan."
+  }
+}

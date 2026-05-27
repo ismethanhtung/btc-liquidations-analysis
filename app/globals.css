@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+:root {
+  --bg-main: #ffffff;
+  --bg-secondary: #f5f6f8;
+  --border-color: #e2e4e8;
+  --text-main: #1b1f28;
+  --text-muted: #6f7686;
+  --color-accent: #007aff;
+  --danger-bg: #fff1f2;
+  --danger-text: #be123c;
+  --danger-border: #fecdd3;
+  --success-bg: #ecfdf3;
+  --success-text: #047857;
+  --success-border: #a7f3d0;
+}
+
+html[data-theme="dark1"] {
+  --bg-main: #0f1217;
+  --bg-secondary: #151a22;
+  --border-color: #273041;
+  --text-main: #e8edf7;
+  --text-muted: #9aa6bb;
+}
+
+html[data-theme="light-pastel-pink"] {
+  --bg-main: #fffafb;
+  --bg-secondary: #fff2f6;
+  --border-color: #f2dbe4;
+  --text-main: #2d1e25;
+  --text-muted: #8c6f7c;
+}
+
+html[data-app-font="plus-jakarta"] { font-family: "Plus Jakarta Sans", sans-serif; }
+html[data-app-font="inter"] { font-family: Inter, sans-serif; }
+html[data-app-font="outfit"] { font-family: Outfit, sans-serif; }
+
+* {
+  border-color: var(--border-color);
+}
+
+body {
+  background: var(--bg-main);
+  color: var(--text-main);
+  transition: background-color 0.2s ease, color 0.2s ease;
+  font-size: 12px;
+}
+
+.thin-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+.thin-scrollbar::-webkit-scrollbar-thumb { background: #c7cbd3; }
+
+.panel-shell { border: 1px solid var(--border-color); background: var(--bg-main); }
+.panel-header { border-bottom: 1px solid var(--border-color); background: color-mix(in oklab, var(--bg-secondary) 40%, transparent); }
+
+.nav-item {
+  border-left: 2px solid transparent;
+  color: var(--text-muted);
+}
+.nav-item:hover {
+  background: color-mix(in oklab, var(--bg-secondary) 88%, white 12%);
+  color: var(--text-main);
+}
+.nav-item-active {
+  border-left-color: var(--color-accent);
+  background: color-mix(in oklab, var(--color-accent) 10%, white 90%);
+  color: var(--text-main);
+}
+
+.input-ui {
+  border: 1px solid var(--border-color);
+  background: var(--bg-main);
+  color: var(--text-main);
+}
+.input-ui:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--color-accent) 40%, white 60%);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-accent) 25%, white 75%);
+}
+
+.badge {
+  display: inline-flex;
+  border: 1px solid;
+  padding: 0.2rem 0.45rem;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
