@@ -15,6 +15,13 @@ function mean(arr) {
   return arr.reduce((s, x) => s + x, 0) / arr.length;
 }
 
+function sampleStd(arr) {
+  if (arr.length < 2) return 0;
+  const m = mean(arr);
+  const v = arr.reduce((s, x) => s + (x - m) ** 2, 0) / (arr.length - 1);
+  return Math.sqrt(v) || 0;
+}
+
 function std(arr) {
   if (!arr.length) return 1;
   const m = mean(arr);
@@ -169,12 +176,8 @@ function evaluateTrade(merged, eventIdx, delayBars, holdBars) {
   const mfe = pctMove(entry, maxHigh);
 
   return {
-    entryIdx,
-    exitIdx,
     entryTs: merged[entryIdx].timestamp,
     exitTs: merged[exitIdx].timestamp,
-    entry,
-    exit,
     ret,
     mae,
     mfe,
@@ -221,15 +224,8 @@ function cosineSimilarity(a, b, featureNames) {
 }
 
 function buildRegimeLogitsFromNeighbors(neighbors) {
-  const score = {
-    mean_revert: 0,
-    trend_down: 0,
-    chop: 0
-  };
-  for (const n of neighbors) {
-    score[n.regime] += Number(n.weight || 0);
-  }
-
+  const score = { mean_revert: 0, trend_down: 0, chop: 0 };
+  for (const n of neighbors) score[n.regime] += Number(n.weight || 0);
   const arr = [score.mean_revert, score.trend_down, score.chop];
   const m = mean(arr);
   const s = std(arr) || 1;
@@ -238,20 +234,19 @@ function buildRegimeLogitsFromNeighbors(neighbors) {
     trend_down: (score.trend_down - m) / s,
     chop: (score.chop - m) / s
   };
-
   const ex = {
     mean_revert: Math.exp(logits.mean_revert),
     trend_down: Math.exp(logits.trend_down),
     chop: Math.exp(logits.chop)
   };
   const sumEx = ex.mean_revert + ex.trend_down + ex.chop;
-  const probs = {
-    mean_revert: sumEx > 0 ? ex.mean_revert / sumEx : 1 / 3,
-    trend_down: sumEx > 0 ? ex.trend_down / sumEx : 1 / 3,
-    chop: sumEx > 0 ? ex.chop / sumEx : 1 / 3
+  return {
+    probs: {
+      mean_revert: sumEx > 0 ? ex.mean_revert / sumEx : 1 / 3,
+      trend_down: sumEx > 0 ? ex.trend_down / sumEx : 1 / 3,
+      chop: sumEx > 0 ? ex.chop / sumEx : 1 / 3
+    }
   };
-
-  return { rawScores: score, logits, probs };
 }
 
 function weightedAvg(items, accessor) {
@@ -275,6 +270,94 @@ function sigmoid(x) {
   return 1 / (1 + Math.exp(-x));
 }
 
+function buildActionsForTarget({
+  targetEvent,
+  eventsWithFeatures,
+  merged,
+  barsPerHour,
+  ranges,
+  scoring,
+  memory,
+  featureNames
+}) {
+  const minHistory = Math.max(20, Number(memory.minHistoryEvents || 80));
+  const histEvents = eventsWithFeatures.filter((e) => e.ts < targetEvent.ts);
+  if (histEvents.length < minHistory) return null;
+
+  const standardizer = fitStandardizer(histEvents, featureNames);
+  const targetNorm = normalizeFeatures(targetEvent.features, standardizer, featureNames);
+  const k = Math.max(5, Number(memory.k || 40));
+  const compared = histEvents.map((h) => {
+    const norm = normalizeFeatures(h.features, standardizer, featureNames);
+    const cos = cosineSimilarity(targetNorm, norm, featureNames);
+    const sim01 = (cos + 1) / 2;
+    const weight = Math.max(1e-6, sim01 ** 3);
+    return { ...h, similarity: sim01, weight };
+  }).sort((a, b) => b.similarity - a.similarity);
+  const neighbors = compared.slice(0, Math.min(k, compared.length));
+  const regime = buildRegimeLogitsFromNeighbors(neighbors);
+
+  const delayList = frange(ranges.delayMin, ranges.delayMax, ranges.delayStep);
+  const holdList = frange(ranges.holdMin, ranges.holdMax, ranges.holdStep);
+  if (!delayList.length || !holdList.length) return null;
+
+  const riskPenalty = Number(scoring.riskPenalty ?? 0.3);
+  const holdPenaltyPerHour = Number(scoring.holdPenaltyPerHour ?? 0.0002);
+  const delayPenaltyPerHour = Number(scoring.delayPenaltyPerHour ?? 0.0001);
+  const uncertaintyPenalty = Number(scoring.uncertaintyPenalty ?? 0.2);
+  const minExpectedRet = Number(scoring.minExpectedRet ?? -0.03);
+  const regimeBias = Number(scoring.regimeBias ?? 0.02);
+
+  const actionRows = [];
+  for (const delayHours of delayList) {
+    const delayBars = Math.max(0, Math.round(delayHours * barsPerHour));
+    for (const holdHours of holdList) {
+      const holdBars = Math.max(1, Math.round(holdHours * barsPerHour));
+      const neighborTrades = [];
+      for (const n of neighbors) {
+        const trade = evaluateTrade(merged, n.idx, delayBars, holdBars);
+        if (!trade) continue;
+        neighborTrades.push({ ...n, trade });
+      }
+      if (neighborTrades.length < Math.max(8, Math.round(k * 0.25))) continue;
+
+      const expectedRet = weightedAvg(neighborTrades, (x) => x.trade.ret);
+      if (expectedRet < minExpectedRet) continue;
+      const expectedMae = weightedAvg(neighborTrades, (x) => x.trade.mae);
+      const winProb = weightedAvg(neighborTrades, (x) => (x.trade.win ? 1 : 0));
+      const retList = neighborTrades.map((x) => Number(x.trade.ret || 0));
+      const uncertainty = std(retList);
+
+      const rawScore =
+        expectedRet
+        - riskPenalty * Math.max(0, -expectedMae)
+        - holdPenaltyPerHour * holdHours
+        - delayPenaltyPerHour * delayHours
+        - uncertaintyPenalty * uncertainty
+        + regimeBias * (regime.probs.mean_revert - regime.probs.trend_down);
+
+      actionRows.push({
+        delayHours,
+        holdHours,
+        expectedRet,
+        expectedMae,
+        winProb,
+        uncertainty,
+        rawScore,
+        score: sigmoid(rawScore / 0.02),
+        realizedTrade: evaluateTrade(merged, targetEvent.idx, delayBars, holdBars)
+      });
+    }
+  }
+  return actionRows;
+}
+
+function pickChosenAction(actions, selectBy) {
+  if (!actions.length) return null;
+  const key = selectBy === "expectedRet" ? "expectedRet" : selectBy === "winProb" ? "winProb" : "score";
+  return [...actions].sort((a, b) => Number(b?.[key] || 0) - Number(a?.[key] || 0))[0];
+}
+
 export async function POST(req) {
   try {
     const body = await req.json();
@@ -284,15 +367,13 @@ export async function POST(req) {
     const ranges = body?.ranges || {};
     const scoring = body?.scoring || {};
     const memory = body?.memory || {};
-    const targetTs = Number(body?.targetTs || 0);
     const regimeCfg = body?.regime || {};
+    const selectBy = String(body?.backtest?.selectBy || "score");
 
     const stepMs = medianStepMs(candles, rows);
     const barsPerHour = Math.max(1, Math.round(3600000 / stepMs));
     const merged = buildMerged(rows, candles);
-    if (!merged.length) {
-      return NextResponse.json({ error: "No merged rows/candles." }, { status: 400 });
-    }
+    if (!merged.length) return NextResponse.json({ error: "No merged rows/candles." }, { status: 400 });
 
     const detected = detectCascadeEvents(merged, {
       q: Number(filters.q ?? 0.99),
@@ -300,15 +381,8 @@ export async function POST(req) {
       zMin: Number(filters.zMin ?? 1.5),
       zWindowHours: Number(filters.zWindowHours ?? 168)
     }, barsPerHour);
-
     if (!detected.events.length) {
-      return NextResponse.json({
-        meta: { barsPerHour, detectedEvents: 0 },
-        message: "No events matched current filter.",
-        regime: null,
-        actions: { top: [], chosen: null },
-        targetEvent: null
-      });
+      return NextResponse.json({ meta: { detectedEvents: 0 }, backtest: { trades: [], summary: null } });
     }
 
     const eventsWithFeatures = detected.events.map((event) => ({
@@ -320,223 +394,107 @@ export async function POST(req) {
         drawdownThreshold: Number(regimeCfg.drawdownThreshold ?? 0.015)
       })
     }));
-
-    const targetEvent = targetTs
-      ? eventsWithFeatures.find((e) => Math.abs(Number(e.ts) - targetTs) <= stepMs)
-      : eventsWithFeatures[eventsWithFeatures.length - 1];
-
-    if (!targetEvent) {
-      return NextResponse.json({ error: "Target event not found." }, { status: 404 });
-    }
-
-    const minHistory = Math.max(20, Number(memory.minHistoryEvents || 80));
-    const histEvents = eventsWithFeatures.filter((e) => e.ts < targetEvent.ts);
-    if (histEvents.length < minHistory) {
-      return NextResponse.json({
-        error: `Not enough history before target event. need>=${minHistory}, got=${histEvents.length}`
-      }, { status: 400 });
-    }
-
     const featureNames = [
-      "totalUsdLog",
-      "longShare",
-      "zScore",
-      "liqToThreshold",
-      "liqImpulse6h",
-      "liqVs24hMean",
-      "ret1hPast",
-      "ret4hPast",
-      "ret24hPast",
-      "vol6h",
-      "vol24h"
+      "totalUsdLog", "longShare", "zScore", "liqToThreshold", "liqImpulse6h",
+      "liqVs24hMean", "ret1hPast", "ret4hPast", "ret24hPast", "vol6h", "vol24h"
     ];
 
-    const standardizer = fitStandardizer(histEvents, featureNames);
-    const targetNorm = normalizeFeatures(targetEvent.features, standardizer, featureNames);
+    let equity = 1;
+    let peak = 1;
+    let maxDrawdown = 0;
+    const trades = [];
+    const realizedReturnsSoFar = [];
+    let skippedNoHistory = 0;
+    let skippedNoAction = 0;
+    let skippedNoRealized = 0;
 
-    const k = Math.max(5, Number(memory.k || 40));
-    const compared = histEvents.map((h) => {
-      const norm = normalizeFeatures(h.features, standardizer, featureNames);
-      const cos = cosineSimilarity(targetNorm, norm, featureNames);
-      const sim01 = (cos + 1) / 2;
-      const weight = Math.max(1e-6, sim01 ** 3);
-      return {
-        ...h,
-        similarity: sim01,
-        weight
-      };
-    }).sort((a, b) => b.similarity - a.similarity);
+    for (const targetEvent of eventsWithFeatures) {
+      const actions = buildActionsForTarget({
+        targetEvent, eventsWithFeatures, merged, barsPerHour, ranges, scoring, memory, featureNames
+      });
+      if (!actions) {
+        skippedNoHistory += 1;
+        continue;
+      }
+      const chosen = pickChosenAction(actions, selectBy);
+      if (!chosen) {
+        skippedNoAction += 1;
+        continue;
+      }
+      if (!chosen.realizedTrade) {
+        skippedNoRealized += 1;
+        continue;
+      }
+      const ret = Number(chosen.realizedTrade.ret || 0);
+      realizedReturnsSoFar.push(ret);
+      const runningMeanRet = mean(realizedReturnsSoFar);
+      const runningStdRet = sampleStd(realizedReturnsSoFar);
+      const runningSharpe = runningStdRet > 0 ? runningMeanRet / runningStdRet : 0;
+      const eventSharpe =
+        Number(chosen.uncertainty || 0) > 0
+          ? Number(chosen.expectedRet || 0) / Number(chosen.uncertainty || 0)
+          : 0;
+      equity *= 1 + ret;
+      if (equity > peak) peak = equity;
+      const dd = peak > 0 ? (equity - peak) / peak : 0;
+      if (dd < maxDrawdown) maxDrawdown = dd;
 
-    const neighbors = compared.slice(0, Math.min(k, compared.length));
-    const regime = buildRegimeLogitsFromNeighbors(neighbors);
-
-    const delayList = frange(ranges.delayMin, ranges.delayMax, ranges.delayStep);
-    const holdList = frange(ranges.holdMin, ranges.holdMax, ranges.holdStep);
-    if (!delayList.length || !holdList.length) {
-      return NextResponse.json({ error: "Invalid delay/hold range." }, { status: 400 });
+      trades.push({
+        ts: targetEvent.ts,
+        timestamp: targetEvent.timestamp,
+        delayHours: chosen.delayHours,
+        holdHours: chosen.holdHours,
+        expectedRet: chosen.expectedRet,
+        expectedMae: chosen.expectedMae,
+        winProb: chosen.winProb,
+        uncertainty: chosen.uncertainty,
+        eventSharpe,
+        score: chosen.score,
+        realizedRet: ret,
+        realizedMae: Number(chosen.realizedTrade.mae || 0),
+        runningSharpe,
+        equity
+      });
     }
 
-    const riskPenalty = Number(scoring.riskPenalty ?? 0.3);
-    const holdPenaltyPerHour = Number(scoring.holdPenaltyPerHour ?? 0.0002);
-    const delayPenaltyPerHour = Number(scoring.delayPenaltyPerHour ?? 0.0001);
-    const uncertaintyPenalty = Number(scoring.uncertaintyPenalty ?? 0.2);
-    const minExpectedRet = Number(scoring.minExpectedRet ?? -0.03);
-    const regimeBias = Number(scoring.regimeBias ?? 0.02);
-
-    const actionRows = [];
-    for (const delayHours of delayList) {
-      const delayBars = Math.max(0, Math.round(delayHours * barsPerHour));
-      for (const holdHours of holdList) {
-        const holdBars = Math.max(1, Math.round(holdHours * barsPerHour));
-
-        const neighborTrades = [];
-        for (const n of neighbors) {
-          const trade = evaluateTrade(merged, n.idx, delayBars, holdBars);
-          if (!trade) continue;
-          neighborTrades.push({ ...n, trade });
-        }
-        if (neighborTrades.length < Math.max(8, Math.round(k * 0.25))) continue;
-
-        const expectedRet = weightedAvg(neighborTrades, (x) => x.trade.ret);
-        const expectedMae = weightedAvg(neighborTrades, (x) => x.trade.mae);
-        const expectedMfe = weightedAvg(neighborTrades, (x) => x.trade.mfe);
-        const winProb = weightedAvg(neighborTrades, (x) => (x.trade.win ? 1 : 0));
-
-        const retList = neighborTrades.map((x) => Number(x.trade.ret || 0));
-        const uncertainty = std(retList);
-
-        if (expectedRet < minExpectedRet) continue;
-
-        const rawScore =
-          expectedRet
-          - riskPenalty * Math.max(0, -expectedMae)
-          - holdPenaltyPerHour * holdHours
-          - delayPenaltyPerHour * delayHours
-          - uncertaintyPenalty * uncertainty
-          + regimeBias * (regime.probs.mean_revert - regime.probs.trend_down);
-
-        const score = sigmoid(rawScore / 0.02);
-        const realizedTrade = evaluateTrade(
-          merged,
-          targetEvent.idx,
-          delayBars,
-          holdBars
-        );
-        const realizedRet = Number(realizedTrade?.ret ?? 0);
-        const realizedMae = Number(realizedTrade?.mae ?? 0);
-        const retError = realizedTrade ? realizedRet - expectedRet : 0;
-        const maeError = realizedTrade ? realizedMae - expectedMae : 0;
-        const realizedWin = realizedTrade ? (realizedRet > 0 ? 1 : 0) : 0;
-        const brierScore = realizedTrade ? (Number(winProb || 0) - realizedWin) ** 2 : 0;
-        const predictionCorrect =
-          realizedTrade
-            ? (expectedRet >= 0) === (realizedRet >= 0)
-            : null;
-
-        actionRows.push({
-          delayHours,
-          holdHours,
-          expectedRet,
-          expectedMae,
-          expectedMfe,
-          winProb,
-          uncertainty,
-          rawScore,
-          score,
-          realizedTrade,
-          realizedRet,
-          realizedMae,
-          retError,
-          absRetError: Math.abs(retError),
-          maeError,
-          absMaeError: Math.abs(maeError),
-          brierScore,
-          predictionCorrect,
-          predictionCorrectScore:
-            predictionCorrect === null ? -1 : predictionCorrect ? 1 : 0,
-          sampleSize: neighborTrades.length,
-          delayBars,
-          holdBars
-        });
-      }
-    }
-
-    actionRows.sort((a, b) => b.score - a.score);
-    const chosen = actionRows[0] || null;
-    const rowsWithRealized = actionRows.filter((x) => x.realizedTrade);
-    const validation = rowsWithRealized.length
-      ? {
-        sampleSize: rowsWithRealized.length,
-        directionAccuracy:
-          rowsWithRealized.reduce((s, x) => s + (x.predictionCorrect ? 1 : 0), 0) / rowsWithRealized.length,
-        meanAbsRetError:
-          rowsWithRealized.reduce((s, x) => s + Number(x.absRetError || 0), 0) / rowsWithRealized.length,
-        rmseRetError: Math.sqrt(
-          rowsWithRealized.reduce((s, x) => s + (Number(x.retError || 0) ** 2), 0) / rowsWithRealized.length
-        ),
-        meanAbsMaeError:
-          rowsWithRealized.reduce((s, x) => s + Number(x.absMaeError || 0), 0) / rowsWithRealized.length,
-        meanBrierScore:
-          rowsWithRealized.reduce((s, x) => s + Number(x.brierScore || 0), 0) / rowsWithRealized.length
-      }
-      : null;
-
-    const chosenTradeRealized = chosen
-      ? evaluateTrade(merged, targetEvent.idx, chosen.delayBars, chosen.holdBars)
-      : null;
-
-    const baselineDelayHours = Number(body?.baseline?.entryDelayHours ?? 1);
-    const baselineHoldHours = Number(body?.baseline?.holdHours ?? 8);
-    const baselineTradeRealized = evaluateTrade(
-      merged,
-      targetEvent.idx,
-      Math.max(0, Math.round(baselineDelayHours * barsPerHour)),
-      Math.max(1, Math.round(baselineHoldHours * barsPerHour))
-    );
+    const tradeCount = trades.length;
+    const returns = trades.map((t) => Number(t.realizedRet || 0));
+    const avgRet = tradeCount ? mean(returns) : 0;
+    const stdRet = tradeCount ? sampleStd(returns) : 0;
+    const winRate = tradeCount ? trades.filter((t) => t.realizedRet > 0).length / tradeCount : 0;
+    const sharpe = stdRet > 0 ? avgRet / stdRet : 0;
+    const firstTs = tradeCount ? Number(trades[0].ts || 0) : 0;
+    const lastTs = tradeCount ? Number(trades[tradeCount - 1].ts || 0) : 0;
+    const elapsedMs = Math.max(1, lastTs - firstTs);
+    const years = elapsedMs / (365.25 * 24 * 3600 * 1000);
+    const tradesPerYear = years > 0 ? tradeCount / years : 0;
+    const sharpeAnnualized =
+      sharpe > 0 && Number.isFinite(tradesPerYear) && tradesPerYear > 0
+        ? sharpe * Math.sqrt(tradesPerYear)
+        : 0;
 
     return NextResponse.json({
       meta: {
-        barsPerHour,
-        stepMs,
         detectedEvents: detected.events.length,
-        historyEvents: histEvents.length,
-        targetTs: targetEvent.ts,
-        kUsed: neighbors.length,
-        threshold: detected.threshold
+        barsPerHour,
+        selectBy
       },
-      targetEvent: {
-        ts: targetEvent.ts,
-        timestamp: targetEvent.timestamp,
-        totalUsd: targetEvent.totalUsd,
-        longShare: targetEvent.longShare,
-        z: targetEvent.z,
-        features: targetEvent.features
-      },
-      regime: {
-        rawScores: regime.rawScores,
-        logits: regime.logits,
-        probs: regime.probs,
-        topNeighbors: neighbors.slice(0, 20).map((n) => ({
-          ts: n.ts,
-          timestamp: n.timestamp,
-          similarity: n.similarity,
-          weight: n.weight,
-          totalUsd: n.totalUsd,
-          longShare: n.longShare,
-          z: n.z,
-          regime: n.regime
-        }))
-      },
-      actions: {
-        totalEvaluated: actionRows.length,
-        validation,
-        top: actionRows,
-        chosen,
-        chosenTradeRealized,
-        baseline: {
-          delayHours: baselineDelayHours,
-          holdHours: baselineHoldHours,
-          realized: baselineTradeRealized
+      backtest: {
+        trades,
+        summary: {
+          tradeCount,
+          winRate,
+          avgRet,
+          stdRet,
+          sharpe,
+          sharpeAnnualized,
+          tradesPerYear,
+          totalReturn: equity - 1,
+          finalEquity: equity,
+          maxDrawdown,
+          skippedNoHistory,
+          skippedNoAction,
+          skippedNoRealized
         }
       }
     });

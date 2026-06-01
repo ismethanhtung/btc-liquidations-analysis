@@ -31,6 +31,7 @@ function fmtTs(iso) {
 }
 
 function fmtRetShort(ret) {
+    if (!Number.isFinite(ret)) return "N/A";
     const pct = Number(ret || 0) * 100;
     const sign = pct >= 0 ? "+" : "";
     return `${sign}${pct.toFixed(2)}%`;
@@ -38,11 +39,36 @@ function fmtRetShort(ret) {
 
 function gradeScore(score) {
     const s = Number(score || 0);
-    if (s >= 0.75) return { label: "Tốt", tone: "good", note: ">= 0.75" };
-    if (s >= 0.6) return { label: "Khá", tone: "ok", note: "0.60-0.74" };
-    if (s >= 0.45)
-        return { label: "Trung tính", tone: "neutral", note: "0.45-0.59" };
-    return { label: "Rủi ro", tone: "bad", note: "< 0.45" };
+    if (s >= 0.65) return { label: "Tốt", tone: "good", note: ">= 0.65" };
+    if (s >= 0.5) return { label: "Khá", tone: "ok", note: "0.50-0.64" };
+    if (s >= 0.35)
+        return { label: "Trung tính", tone: "neutral", note: "0.35-0.49" };
+    return { label: "Rủi ro", tone: "bad", note: "< 0.35" };
+}
+
+function buildScoreBands(actions) {
+    const scores = (actions || [])
+        .map((x) => Number(x?.score))
+        .filter((x) => Number.isFinite(x))
+        .sort((a, b) => a - b);
+    if (scores.length < 4) return null;
+    return {
+        q25: quantile(scores, 0.25),
+        q50: quantile(scores, 0.5),
+        q75: quantile(scores, 0.75),
+    };
+}
+
+function gradeScoreAdaptive(score, bands) {
+    if (!bands) return gradeScore(score);
+    const s = Number(score || 0);
+    if (s >= bands.q75)
+        return { label: "Tốt", tone: "good", note: `>= P75 (${(bands.q75 * 100).toFixed(2)}%)` };
+    if (s >= bands.q50)
+        return { label: "Khá", tone: "ok", note: `P50-P75 (${(bands.q50 * 100).toFixed(2)}% - ${(bands.q75 * 100).toFixed(2)}%)` };
+    if (s >= bands.q25)
+        return { label: "Trung tính", tone: "neutral", note: `P25-P50 (${(bands.q25 * 100).toFixed(2)}% - ${(bands.q50 * 100).toFixed(2)}%)` };
+    return { label: "Rủi ro", tone: "bad", note: `< P25 (${(bands.q25 * 100).toFixed(2)}%)` };
 }
 
 function gradeProbability(p) {
@@ -264,7 +290,7 @@ function buildCascadeAnalysis(rows, candles, opts) {
         Math.round((opts.entryDelayHours || 0) * barsPerHour),
     );
     const holdBars = Math.max(
-        1,
+        0,
         Math.round((opts.holdHours || 8) * barsPerHour),
     );
 
@@ -290,30 +316,41 @@ function buildCascadeAnalysis(rows, candles, opts) {
 
         const entryIdx = i + entryDelayBars;
         const exitIdx = entryIdx + holdBars;
-        if (exitIdx >= merged.length) continue;
-        const entry = merged[entryIdx].candle.close;
-        const exit = merged[exitIdx].candle.close;
-        const ret = entry > 0 ? (exit - entry) / entry : 0;
+        const hasForwardBars =
+            entryIdx < merged.length && exitIdx < merged.length;
+        let ret = null;
+        let win = null;
+        let entryTs = null;
+        let exitTs = null;
+        if (hasForwardBars) {
+            const entry = merged[entryIdx].candle.close;
+            const exit = merged[exitIdx].candle.close;
+            ret = entry > 0 ? (exit - entry) / entry : 0;
+            win = ret > 0;
+            entryTs = merged[entryIdx].timestamp;
+            exitTs = merged[exitIdx].timestamp;
+        }
         events.push({
             ts: m.ts,
             timestamp: m.timestamp,
             totalUsd: m.totalUsd,
             longShare,
             z,
-            entryTs: merged[entryIdx].timestamp,
-            exitTs: merged[exitIdx].timestamp,
+            entryTs,
+            exitTs,
             ret,
-            win: ret > 0,
+            win,
         });
     }
 
-    const winCount = events.filter((e) => e.win).length;
+    const tradableEvents = events.filter((e) => Number.isFinite(e.ret));
+    const winCount = tradableEvents.filter((e) => e.win).length;
     return {
         events,
         summary: {
             count: events.length,
-            winRate: events.length ? winCount / events.length : 0,
-            avgRet: events.length ? mean(events.map((e) => e.ret)) : 0,
+            winRate: tradableEvents.length ? winCount / tradableEvents.length : 0,
+            avgRet: tradableEvents.length ? mean(tradableEvents.map((e) => e.ret)) : 0,
             holdBars,
             entryDelayBars,
             threshold,
@@ -473,6 +510,11 @@ export default function AnalysisDashboard({
     const [futureInferResult, setFutureInferResult] = useState(null);
     const [futureInferLoading, setFutureInferLoading] = useState(false);
     const [futureInferError, setFutureInferError] = useState("");
+    const [futureBacktestResult, setFutureBacktestResult] = useState(null);
+    const [futureBacktestLoading, setFutureBacktestLoading] = useState(false);
+    const [futureBacktestError, setFutureBacktestError] = useState("");
+    const [backtestSelectBy, setBacktestSelectBy] = useState("score");
+    const [backtestInitialCapital, setBacktestInitialCapital] = useState(1000);
     const [startingCapital, setStartingCapital] = useState(1000);
     const [selectedEventTs, setSelectedEventTs] = useState(null);
     const [selectedCustomTrade, setSelectedCustomTrade] = useState(null);
@@ -513,12 +555,12 @@ export default function AnalysisDashboard({
         holdStep: 1,
     });
     const [inferScoring, setInferScoring] = useState({
-        riskPenalty: 0.5,
-        holdPenaltyPerHour: 0.0005,
-        delayPenaltyPerHour: 0.0002,
-        uncertaintyPenalty: 0.35,
+        riskPenalty: 0.3,
+        holdPenaltyPerHour: 0.0002,
+        delayPenaltyPerHour: 0.0001,
+        uncertaintyPenalty: 0.2,
         minExpectedRet: -0.03,
-        regimeBias: 0.01,
+        regimeBias: 0.02,
     });
     const [inferMemory, setInferMemory] = useState({
         k: 40,
@@ -529,11 +571,28 @@ export default function AnalysisDashboard({
         retThreshold: 0.008,
         drawdownThreshold: 0.015,
     });
+    const [actionsSort, setActionsSort] = useState({
+        key: "score",
+        dir: "desc",
+    });
 
     const selectedCascadeEvent = useMemo(
         () => cascade.events.find((e) => e.ts === selectedEventTs) || null,
         [cascade.events, selectedEventTs],
     );
+    const sortedActions = useMemo(() => {
+        const items = [...(futureInferResult?.actions?.top || [])];
+        const { key, dir } = actionsSort;
+        const sign = dir === "asc" ? 1 : -1;
+        items.sort((a, b) => {
+            const av = Number(a?.[key] ?? 0);
+            const bv = Number(b?.[key] ?? 0);
+            if (av < bv) return -1 * sign;
+            if (av > bv) return 1 * sign;
+            return 0;
+        });
+        return items;
+    }, [futureInferResult?.actions?.top, actionsSort]);
 
     const selectedTrade = selectedCustomTrade || selectedCascadeEvent || null;
 
@@ -585,7 +644,7 @@ export default function AnalysisDashboard({
             )
             .map((e) => {
                 const sec = Math.floor(e.ts / 1000);
-                const wl = e.win ? "W" : "L";
+                const wl = Number.isFinite(e.ret) ? (e.win ? "W" : "L") : "N";
                 return {
                     time: sec,
                     position: "aboveBar",
@@ -609,7 +668,7 @@ export default function AnalysisDashboard({
             )
             .map((e) => {
                 const sec = Math.floor(e.ts / 1000);
-                const wl = e.win ? "W" : "L";
+                const wl = Number.isFinite(e.ret) ? (e.win ? "W" : "L") : "N";
                 return {
                     time: sec,
                     position: "inBar",
@@ -990,6 +1049,63 @@ export default function AnalysisDashboard({
         }
     }
 
+    async function runFutureBacktestAllEvents() {
+        setFutureBacktestError("");
+        setFutureBacktestLoading(true);
+        try {
+            const payloadRows = rows.map((r) => ({
+                ts: r.ts,
+                timestamp: r.timestamp,
+                totalUsd: r.totalUsd,
+                longUsd: r.longUsd,
+                shortUsd: r.shortUsd,
+            }));
+            const payloadCandles = candles.map((c) => ({
+                time: c.time,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+            }));
+            const res = await fetch("/api/analysis/cascade-future-backtest", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    rows: payloadRows,
+                    candles: payloadCandles,
+                    filters: {
+                        q: Number(cascadeOptions?.q ?? 0.95),
+                        minLongShare: Number(
+                            cascadeOptions?.minLongShare ?? 0.65,
+                        ),
+                        zMin: Number(cascadeOptions?.zMin ?? 1.5),
+                        zWindowHours: Number(
+                            cascadeOptions?.zWindowHours ?? 168,
+                        ),
+                    },
+                    ranges: inferRanges,
+                    scoring: inferScoring,
+                    memory: inferMemory,
+                    regime: inferRegime,
+                    backtest: {
+                        selectBy: backtestSelectBy,
+                    },
+                }),
+            });
+            const json = await res.json();
+            if (!res.ok)
+                throw new Error(
+                    json?.error || `Future backtest failed: ${res.status}`,
+                );
+            setFutureBacktestResult(json);
+        } catch (e) {
+            setFutureBacktestError(e?.message || "Backtest thất bại.");
+            setFutureBacktestResult(null);
+        } finally {
+            setFutureBacktestLoading(false);
+        }
+    }
+
     const capitalProjection = useMemo(() => {
         const initial = Number(startingCapital || 0);
         if (!Number.isFinite(initial) || initial <= 0) {
@@ -1043,11 +1159,16 @@ export default function AnalysisDashboard({
     const regimeChopGrade = gradeProbability(
         futureInferResult?.regime?.probs?.chop || 0,
     );
-    const chosenScoreGrade = gradeScore(
-        futureInferResult?.actions?.chosen?.score || 0,
-    );
     const chosenRetGrade = gradeExpectedRet(
         futureInferResult?.actions?.chosen?.expectedRet || 0,
+    );
+    const actionsScoreBands = useMemo(
+        () => buildScoreBands(futureInferResult?.actions?.top || []),
+        [futureInferResult?.actions?.top],
+    );
+    const chosenScoreGradeAdaptive = gradeScoreAdaptive(
+        futureInferResult?.actions?.chosen?.score || 0,
+        actionsScoreBands,
     );
 
     return (
@@ -1519,6 +1640,230 @@ export default function AnalysisDashboard({
                                 ? "Đang suy luận..."
                                 : "Suy luận cho event đang chọn (hoặc event mới nhất)"}
                         </button>
+                        <div className="border border-[var(--border-color)] p-3 space-y-2">
+                            <p className="text-[11px] font-semibold">
+                                Backtest toàn bộ event (Phân tích 3)
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <label className="text-[11px] text-[var(--text-muted)]">
+                                    Chọn action theo
+                                </label>
+                                <select
+                                    value={backtestSelectBy}
+                                    onChange={(e) =>
+                                        setBacktestSelectBy(e.target.value)
+                                    }
+                                    className="border border-[var(--border-color)] px-2 py-1 text-[11px] bg-transparent"
+                                >
+                                    <option value="score">Score</option>
+                                    <option value="expectedRet">
+                                        Expected Ret
+                                    </option>
+                                    <option value="winProb">Win Prob</option>
+                                </select>
+                                <InputSmall
+                                    label="Vốn ban đầu (USD)"
+                                    value={backtestInitialCapital}
+                                    onChange={setBacktestInitialCapital}
+                                />
+                                <button
+                                    onClick={runFutureBacktestAllEvents}
+                                    className="border border-[var(--border-color)] px-3 py-1 text-[11px] font-semibold"
+                                >
+                                    {futureBacktestLoading
+                                        ? "Đang backtest..."
+                                        : "Chạy backtest all events"}
+                                </button>
+                            </div>
+                            {futureBacktestError ? (
+                                <p className="text-[11px] text-[var(--danger-text)]">
+                                    {futureBacktestError}
+                                </p>
+                            ) : null}
+                            {futureBacktestResult?.backtest?.summary ? (
+                                <div className="space-y-2">
+                                    {(() => {
+                                        const initial = Math.max(
+                                            0,
+                                            Number(backtestInitialCapital || 0),
+                                        );
+                                        const finalCapital =
+                                            initial *
+                                            Number(
+                                                futureBacktestResult.backtest
+                                                    .summary.finalEquity || 1,
+                                            );
+                                        const pnl = finalCapital - initial;
+                                        return (
+                                            <div className="grid gap-2 lg:grid-cols-2">
+                                                <Metric
+                                                    label="Initial Capital"
+                                                    value={`$${fmtInt(initial)}`}
+                                                />
+                                                <Metric
+                                                    label="Final Capital / PnL"
+                                                    value={`$${fmtInt(Math.round(finalCapital))} / ${pnl >= 0 ? "+" : ""}$${fmtInt(Math.round(pnl))}`}
+                                                />
+                                            </div>
+                                        );
+                                    })()}
+                                    <div className="grid gap-2 lg:grid-cols-6">
+                                        <Metric
+                                            label="Trades"
+                                            value={fmtInt(
+                                                futureBacktestResult.backtest
+                                                    .summary.tradeCount || 0,
+                                            )}
+                                            helper={`detected=${fmtInt(futureBacktestResult?.meta?.detectedEvents || 0)}`}
+                                        />
+                                        <Metric
+                                            label="Win Rate"
+                                            value={`${pctFmt.format((futureBacktestResult.backtest.summary.winRate || 0) * 100)}%`}
+                                        />
+                                        <Metric
+                                            label="Avg Ret/Trade"
+                                            value={`${pctFmt.format((futureBacktestResult.backtest.summary.avgRet || 0) * 100)}%`}
+                                        />
+                                        <Metric
+                                            label="Total Return"
+                                            value={`${pctFmt.format((futureBacktestResult.backtest.summary.totalReturn || 0) * 100)}%`}
+                                        />
+                                        <Metric
+                                            label="Max Drawdown"
+                                            value={`${pctFmt.format((futureBacktestResult.backtest.summary.maxDrawdown || 0) * 100)}%`}
+                                        />
+                                        <Metric
+                                            label="Sharpe"
+                                            value={Number(
+                                                futureBacktestResult.backtest
+                                                    .summary.sharpe || 0,
+                                            ).toFixed(3)}
+                                            helper="mean(ret) / std(ret), rf=0"
+                                        />
+                                        <Metric
+                                            label="Sharpe (Annualized)"
+                                            value={Number(
+                                                futureBacktestResult.backtest
+                                                    .summary
+                                                    .sharpeAnnualized || 0,
+                                            ).toFixed(3)}
+                                            helper={`trades/year=${Number(futureBacktestResult.backtest.summary.tradesPerYear || 0).toFixed(1)}`}
+                                        />
+                                        <Metric
+                                            label="Return Volatility"
+                                            value={`${pctFmt.format((futureBacktestResult.backtest.summary.stdRet || 0) * 100)}%`}
+                                            helper="Std dev per trade"
+                                        />
+                                        <Metric
+                                            label="Skipped"
+                                            value={`${fmtInt(futureBacktestResult.backtest.summary.skippedNoHistory || 0)} / ${fmtInt(futureBacktestResult.backtest.summary.skippedNoAction || 0)} / ${fmtInt(futureBacktestResult.backtest.summary.skippedNoRealized || 0)}`}
+                                            helper="history / no-action / no-realized"
+                                        />
+                                    </div>
+                                    <div className="max-h-[260px] overflow-auto thin-scrollbar">
+                                        <table className="w-full text-[11px]">
+                                            <thead>
+                                                <tr className="border-b border-[var(--border-color)] text-left text-[var(--text-muted)]">
+                                                    <th className="py-2">Event</th>
+                                                    <th className="py-2">Delay</th>
+                                                    <th className="py-2">Hold</th>
+                                                    <th className="py-2">
+                                                        Expected Ret
+                                                    </th>
+                                                    <th className="py-2">
+                                                        Win Prob
+                                                    </th>
+                                                    <th className="py-2">
+                                                        Score
+                                                    </th>
+                                                    <th className="py-2">
+                                                        Event Sharpe
+                                                    </th>
+                                                    <th className="py-2">
+                                                        Running Sharpe
+                                                    </th>
+                                                    <th className="py-2">
+                                                        Realized Ret
+                                                    </th>
+                                                    <th className="py-2">
+                                                        Equity
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(futureBacktestResult.backtest
+                                                    .trades || []
+                                                ).map((t, i) => (
+                                                    <tr
+                                                        key={`${t.ts}-${i}`}
+                                                        className="border-b border-[var(--border-color)]/70"
+                                                    >
+                                                        <td className="py-2">
+                                                            {fmtTs(t.timestamp)}
+                                                        </td>
+                                                        <td className="py-2">
+                                                            {t.delayHours}h
+                                                        </td>
+                                                        <td className="py-2">
+                                                            {t.holdHours}h
+                                                        </td>
+                                                        <td className="py-2">
+                                                            {pctFmt.format(
+                                                                (t.expectedRet ||
+                                                                    0) *
+                                                                    100,
+                                                            )}
+                                                            %
+                                                        </td>
+                                                        <td className="py-2">
+                                                            {pctFmt.format(
+                                                                (t.winProb ||
+                                                                    0) *
+                                                                    100,
+                                                            )}
+                                                            %
+                                                        </td>
+                                                        <td className="py-2">
+                                                            {pctFmt.format(
+                                                                (t.score || 0) *
+                                                                    100,
+                                                            )}
+                                                            %
+                                                        </td>
+                                                        <td className="py-2">
+                                                            {Number(
+                                                                t.eventSharpe ||
+                                                                    0,
+                                                            ).toFixed(3)}
+                                                        </td>
+                                                        <td className="py-2">
+                                                            {Number(
+                                                                t.runningSharpe ||
+                                                                    0,
+                                                            ).toFixed(3)}
+                                                        </td>
+                                                        <td className="py-2">
+                                                            {pctFmt.format(
+                                                                (t.realizedRet ||
+                                                                    0) *
+                                                                    100,
+                                                            )}
+                                                            %
+                                                        </td>
+                                                        <td className="py-2">
+                                                            x
+                                                            {Number(
+                                                                t.equity || 1,
+                                                            ).toFixed(3)}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
                         <p className="text-[11px] text-[var(--text-muted)]">
                             Luồng chạy: lấy snapshot feature tại <code>t0</code>{" "}
                             của event target, tìm <code>K</code> event quá khứ
@@ -1538,10 +1883,12 @@ export default function AnalysisDashboard({
                             </p>
                             <div className="grid gap-2 lg:grid-cols-2 text-[10px] text-[var(--text-muted)]">
                                 <p>
-                                    <b>Score:</b> Tốt <code>&gt;=0.75</code>,
-                                    Khá <code>0.60-0.74</code>, Trung tính{" "}
-                                    <code>0.45-0.59</code>, Rủi ro{" "}
-                                    <code>&lt;0.45</code>.
+                                    <b>Score:</b> xếp loại theo phân vị trên
+                                    tập action hiện tại: Tốt{" "}
+                                    <code>&gt;=P75</code>, Khá{" "}
+                                    <code>P50-P75</code>, Trung tính{" "}
+                                    <code>P25-P50</code>, Rủi ro{" "}
+                                    <code>&lt;P25</code>.
                                 </p>
                                 <p>
                                     <b>Regime Prob:</b> Mạnh{" "}
@@ -1647,7 +1994,7 @@ export default function AnalysisDashboard({
                                             <Metric
                                                 label="Chosen Delay/Hold"
                                                 value={`${futureInferResult.actions.chosen.delayHours}h / ${futureInferResult.actions.chosen.holdHours}h`}
-                                                helper={`score=${pctFmt.format((futureInferResult.actions.chosen.score || 0) * 100)}% (${chosenScoreGrade.label}, ${chosenScoreGrade.note})`}
+                                                helper={`score=${pctFmt.format((futureInferResult.actions.chosen.score || 0) * 100)}% (${chosenScoreGradeAdaptive.label}, ${chosenScoreGradeAdaptive.note})`}
                                                 info="Action có score cao nhất sau khi cân bằng lợi nhuận kỳ vọng, rủi ro, độ bất định và bias regime."
                                             />
                                             <Metric
@@ -1710,6 +2057,50 @@ export default function AnalysisDashboard({
                                         ) : null}
                                     </div>
                                 ) : null}
+                                {futureInferResult?.actions?.validation ? (
+                                    <div className="border border-[var(--border-color)] p-3">
+                                        <p className="text-[11px] font-semibold">
+                                            Kiểm định chất lượng dự đoán (trên
+                                            các action đã có kết quả thực tế)
+                                        </p>
+                                        <div className="grid gap-3 lg:grid-cols-5 mt-2">
+                                            <Metric
+                                                label="Direction Accuracy"
+                                                value={`${pctFmt.format((futureInferResult.actions.validation.directionAccuracy || 0) * 100)}%`}
+                                                helper={`n=${fmtInt(futureInferResult.actions.validation.sampleSize || 0)}`}
+                                                info="Tỷ lệ dự đoán đúng hướng tăng/giảm."
+                                            />
+                                            <Metric
+                                                label="Mean |Ret Error|"
+                                                value={`${pctFmt.format((futureInferResult.actions.validation.meanAbsRetError || 0) * 100)}%`}
+                                                helper="Càng thấp càng tốt"
+                                                info="Sai số tuyệt đối trung bình giữa Expected Ret và Ret thực tế."
+                                            />
+                                            <Metric
+                                                label="RMSE Ret Error"
+                                                value={`${pctFmt.format((futureInferResult.actions.validation.rmseRetError || 0) * 100)}%`}
+                                                helper="Phạt mạnh sai số lớn"
+                                                info="Root mean squared error của return dự đoán."
+                                            />
+                                            <Metric
+                                                label="Mean |MAE Error|"
+                                                value={`${pctFmt.format((futureInferResult.actions.validation.meanAbsMaeError || 0) * 100)}%`}
+                                                helper="Càng thấp càng tốt"
+                                                info="Sai số tuyệt đối trung bình giữa Expected MAE và MAE thực tế."
+                                            />
+                                            <Metric
+                                                label="Mean Brier"
+                                                value={Number(
+                                                    futureInferResult.actions
+                                                        .validation
+                                                        .meanBrierScore || 0,
+                                                ).toFixed(4)}
+                                                helper="0 là tốt nhất"
+                                                info="Độ chuẩn xác xác suất Win Prob so với kết quả thực tế (0/1)."
+                                            />
+                                        </div>
+                                    </div>
+                                ) : null}
                                 <div className="max-h-[380px] overflow-auto thin-scrollbar">
                                     <table className="w-full text-[11px]">
                                         <thead>
@@ -1717,53 +2108,137 @@ export default function AnalysisDashboard({
                                                 <ThWithInfo
                                                     label="Delay"
                                                     info="Số giờ chờ sau event trước khi vào lệnh."
+                                                    sortable
+                                                    sortKey="delayHours"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
                                                 />
                                                 <ThWithInfo
                                                     label="Hold"
                                                     info="Số giờ giữ lệnh sau khi vào."
+                                                    sortable
+                                                    sortKey="holdHours"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
                                                 />
                                                 <ThWithInfo
                                                     label="Expected Ret"
                                                     info="Lợi nhuận kỳ vọng (trung bình trọng số từ top-K event tương đồng)."
+                                                    sortable
+                                                    sortKey="expectedRet"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
                                                 />
                                                 <ThWithInfo
                                                     label="Expected MAE"
                                                     info="MAE kỳ vọng: mức âm lớn nhất trong thời gian giữ lệnh; càng gần 0 càng an toàn."
+                                                    sortable
+                                                    sortKey="expectedMae"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
                                                 />
                                                 <ThWithInfo
                                                     label="Win Prob"
                                                     info="Xác suất win ước lượng từ top-K event tương đồng."
+                                                    sortable
+                                                    sortKey="winProb"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
                                                 />
                                                 <ThWithInfo
                                                     label="Uncertainty"
                                                     info="Độ bất định của expected return, tính từ độ lệch chuẩn return trên neighbors."
+                                                    sortable
+                                                    sortKey="uncertainty"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
                                                 />
                                                 <ThWithInfo
                                                     label="Sample"
                                                     info="Số neighbor có đủ dữ liệu để tính action này."
+                                                    sortable
+                                                    sortKey="sampleSize"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
                                                 />
                                                 <ThWithInfo
                                                     label="RawScore"
                                                     info="Điểm thô trước sigmoid, gồm ret - các penalty + regime bias."
+                                                    sortable
+                                                    sortKey="rawScore"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
                                                 />
                                                 <ThWithInfo
                                                     label="Score"
                                                     info="Điểm chuẩn hóa 0-1 để xếp hạng action. Càng cao càng ưu tiên."
+                                                    sortable
+                                                    sortKey="score"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
                                                 />
                                                 <ThWithInfo
                                                     label="Xếp loại"
                                                     info="Đánh giá nhanh theo các ngưỡng Score để dễ ra quyết định."
                                                 />
+                                                <ThWithInfo
+                                                    label="KQ thực tế"
+                                                    info="Return thực tế khi áp delay/hold này lên chính event target (chỉ có khi event đã có dữ liệu tương lai)."
+                                                    sortable
+                                                    sortKey="realizedRet"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
+                                                />
+                                                <ThWithInfo
+                                                    label="MAE thực tế"
+                                                    info="Drawdown thực tế tệ nhất trong thời gian giữ lệnh của action này."
+                                                    sortable
+                                                    sortKey="realizedMae"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
+                                                />
+                                                <ThWithInfo
+                                                    label="Đúng/Sai"
+                                                    info="So hướng dự đoán (Expected Ret dương/âm) với hướng kết quả thực tế."
+                                                    sortable
+                                                    sortKey="predictionCorrectScore"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
+                                                />
+                                                <ThWithInfo
+                                                    label="Lệch Ret"
+                                                    info="Ret thực tế - Expected Ret."
+                                                    sortable
+                                                    sortKey="absRetError"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
+                                                />
+                                                <ThWithInfo
+                                                    label="Lệch MAE"
+                                                    info="MAE thực tế - Expected MAE."
+                                                    sortable
+                                                    sortKey="absMaeError"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
+                                                />
+                                                <ThWithInfo
+                                                    label="Brier"
+                                                    info="Sai số xác suất Win Prob so với outcome thực tế (0 là tốt nhất)."
+                                                    sortable
+                                                    sortKey="brierScore"
+                                                    activeSort={actionsSort}
+                                                    onSort={setActionsSort}
+                                                />
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {(
-                                                futureInferResult?.actions
-                                                    ?.top || []
-                                            ).map((a, i) =>
+                                            {sortedActions.map((a, i) =>
                                                 (() => {
                                                     const scoreGrade =
-                                                        gradeScore(a.score);
+                                                        gradeScoreAdaptive(
+                                                            a.score,
+                                                            actionsScoreBands,
+                                                        );
                                                     const retGrade =
                                                         gradeExpectedRet(
                                                             a.expectedRet,
@@ -1847,17 +2322,50 @@ export default function AnalysisDashboard({
                                                                     </span>
                                                                 </div>
                                                             </td>
+                                                            <td className="py-2">
+                                                                {a.realizedTrade
+                                                                    ? `${pctFmt.format((a.realizedRet || 0) * 100)}%`
+                                                                    : "N/A"}
+                                                            </td>
+                                                            <td className="py-2">
+                                                                {a.realizedTrade
+                                                                    ? `${pctFmt.format((a.realizedMae || 0) * 100)}%`
+                                                                    : "N/A"}
+                                                            </td>
+                                                            <td className="py-2">
+                                                                {a.predictionCorrect ===
+                                                                null
+                                                                    ? "N/A"
+                                                                    : a.predictionCorrect
+                                                                      ? "Đúng"
+                                                                      : "Sai"}
+                                                            </td>
+                                                            <td className="py-2">
+                                                                {a.realizedTrade
+                                                                    ? `${pctFmt.format((a.retError || 0) * 100)}%`
+                                                                    : "N/A"}
+                                                            </td>
+                                                            <td className="py-2">
+                                                                {a.realizedTrade
+                                                                    ? `${pctFmt.format((a.maeError || 0) * 100)}%`
+                                                                    : "N/A"}
+                                                            </td>
+                                                            <td className="py-2">
+                                                                {a.realizedTrade
+                                                                    ? Number(
+                                                                          a.brierScore ||
+                                                                              0,
+                                                                      ).toFixed(4)
+                                                                    : "N/A"}
+                                                            </td>
                                                         </tr>
                                                     );
                                                 })(),
                                             )}
-                                            {(
-                                                futureInferResult?.actions
-                                                    ?.top || []
-                                            ).length === 0 ? (
+                                            {sortedActions.length === 0 ? (
                                                 <tr>
                                                     <td
-                                                        colSpan={10}
+                                                        colSpan={16}
                                                         className="py-3 text-[var(--text-muted)]"
                                                     >
                                                         Không có action đủ
@@ -2155,214 +2663,220 @@ export default function AnalysisDashboard({
                     value={near ? fmtUsd(near.totalUsd) : "N/A"}
                     helper="Tổng liquidation ở event gần nhất."
                 />
-                <Metric
-                    label="Coverage theo tháng"
-                    value={
-                        hoverMonthCoverage
-                            ? `${pctFmt.format(hoverMonthCoverage.coveragePct)}%`
-                            : "N/A"
-                    }
-                    helper="Độ đầy đủ dữ liệu trong tháng chứa con trỏ."
-                />
+                {!isAnalysis3 ? (
+                    <Metric
+                        label="Coverage theo tháng"
+                        value={
+                            hoverMonthCoverage
+                                ? `${pctFmt.format(hoverMonthCoverage.coveragePct)}%`
+                                : "N/A"
+                        }
+                        helper="Độ đầy đủ dữ liệu trong tháng chứa con trỏ."
+                    />
+                ) : null}
             </div>
 
-            <div className="px-5 grid gap-3 lg:grid-cols-3">
-                <Metric
-                    label="Số điểm dữ liệu"
-                    value={fmtInt(stats.summary.rows)}
-                    helper="Số dòng record trong file."
-                />
-                <Metric
-                    label="Số điểm kỳ vọng"
-                    value={fmtInt(stats.summary.expectedRows || 0)}
-                    helper="Nếu đầy đủ theo khung thời gian chuẩn thì cần bấy nhiêu điểm."
-                />
-                <Metric
-                    label="Độ đầy đủ (coverage)"
-                    value={`${pctFmt.format(Number(stats.summary.coveragePct || 0))}%`}
-                    helper="Coverage càng cao thì backtest càng đáng tin."
-                />
-                <Metric
-                    label="Tổng liquidation"
-                    value={fmtUsd(stats.summary.totalUsd || 0)}
-                    helper="Tổng long + short toàn bộ range."
-                />
-                <Metric
-                    label="Trung bình mỗi điểm"
-                    value={fmtUsd(stats.summary.avgUsd || 0)}
-                    helper="Liquidation trung bình/event."
-                />
-                <Metric
-                    label="Median mỗi điểm"
-                    value={fmtUsd(stats.summary.medianUsd || 0)}
-                    helper="Mốc 50%, ít bị ảnh hưởng bởi outlier."
-                />
-                <Metric
-                    label="P90"
-                    value={fmtUsd(stats.summary.p90 || 0)}
-                    helper="10% sự kiện lớn hơn mốc này."
-                />
-                <Metric
-                    label="P95"
-                    value={fmtUsd(stats.summary.p95 || 0)}
-                    helper="5% sự kiện lớn hơn mốc này."
-                />
-                <Metric
-                    label="P99 / Max"
-                    value={`${fmtUsd(stats.summary.p99 || 0)} / ${fmtUsd(stats.summary.max || 0)}`}
-                    helper="Rủi ro tail và đỉnh cực trị."
-                />
-            </div>
-
-            <div className="px-5 grid gap-3 lg:grid-cols-2">
-                <div className="border border-[var(--border-color)] p-3">
-                    <p className="text-[12px] font-semibold mb-2">
-                        Top Spikes (Sự kiện cực trị)
-                    </p>
-                    <div className="space-y-1 text-[11px]">
-                        {stats.topEvents.slice(0, 10).map((e) => (
-                            <div
-                                key={e.timestamp}
-                                className={`flex justify-between gap-3 px-2 py-1 ${sameHour(e.timestamp, hoverIso) ? "bg-[var(--bg-secondary)]" : ""}`}
-                            >
-                                <span className="text-[var(--text-muted)]">
-                                    {fmtTs(e.timestamp)}
-                                </span>
-                                <span className="font-semibold">
-                                    {fmtUsd(e.totalUsd)}
-                                </span>
-                            </div>
-                        ))}
+            {!isAnalysis3 ? (
+                <>
+                    <div className="px-5 grid gap-3 lg:grid-cols-3">
+                        <Metric
+                            label="Số điểm dữ liệu"
+                            value={fmtInt(stats.summary.rows)}
+                            helper="Số dòng record trong file."
+                        />
+                        <Metric
+                            label="Số điểm kỳ vọng"
+                            value={fmtInt(stats.summary.expectedRows || 0)}
+                            helper="Nếu đầy đủ theo khung thời gian chuẩn thì cần bấy nhiêu điểm."
+                        />
+                        <Metric
+                            label="Độ đầy đủ (coverage)"
+                            value={`${pctFmt.format(Number(stats.summary.coveragePct || 0))}%`}
+                            helper="Coverage càng cao thì backtest càng đáng tin."
+                        />
+                        <Metric
+                            label="Tổng liquidation"
+                            value={fmtUsd(stats.summary.totalUsd || 0)}
+                            helper="Tổng long + short toàn bộ range."
+                        />
+                        <Metric
+                            label="Trung bình mỗi điểm"
+                            value={fmtUsd(stats.summary.avgUsd || 0)}
+                            helper="Liquidation trung bình/event."
+                        />
+                        <Metric
+                            label="Median mỗi điểm"
+                            value={fmtUsd(stats.summary.medianUsd || 0)}
+                            helper="Mốc 50%, ít bị ảnh hưởng bởi outlier."
+                        />
+                        <Metric
+                            label="P90"
+                            value={fmtUsd(stats.summary.p90 || 0)}
+                            helper="10% sự kiện lớn hơn mốc này."
+                        />
+                        <Metric
+                            label="P95"
+                            value={fmtUsd(stats.summary.p95 || 0)}
+                            helper="5% sự kiện lớn hơn mốc này."
+                        />
+                        <Metric
+                            label="P99 / Max"
+                            value={`${fmtUsd(stats.summary.p99 || 0)} / ${fmtUsd(stats.summary.max || 0)}`}
+                            helper="Rủi ro tail và đỉnh cực trị."
+                        />
                     </div>
-                </div>
 
-                <div className="border border-[var(--border-color)] p-3">
-                    <p className="text-[12px] font-semibold mb-2">
-                        Top Missing Gaps
-                    </p>
-                    <div className="space-y-1 text-[11px]">
-                        {stats.topGaps.length === 0 && (
-                            <p className="text-[var(--text-muted)]">
-                                Không có gap &gt; 1h.
+                    <div className="px-5 grid gap-3 lg:grid-cols-2">
+                        <div className="border border-[var(--border-color)] p-3">
+                            <p className="text-[12px] font-semibold mb-2">
+                                Top Spikes (Sự kiện cực trị)
                             </p>
-                        )}
-                        {stats.topGaps.slice(0, 10).map((g) => (
-                            <div
-                                key={`${g.from}-${g.to}`}
-                                className={`flex justify-between gap-3 px-2 py-1 ${hoverIso && hoverIso >= g.from && hoverIso <= g.to ? "bg-[var(--bg-secondary)]" : ""}`}
-                            >
-                                <span className="text-[var(--text-muted)]">
-                                    {fmtTs(g.from)} - {fmtTs(g.to)}
-                                </span>
-                                <span className="font-semibold">
-                                    {g.missingHours}h
-                                </span>
+                            <div className="space-y-1 text-[11px]">
+                                {stats.topEvents.slice(0, 10).map((e) => (
+                                    <div
+                                        key={e.timestamp}
+                                        className={`flex justify-between gap-3 px-2 py-1 ${sameHour(e.timestamp, hoverIso) ? "bg-[var(--bg-secondary)]" : ""}`}
+                                    >
+                                        <span className="text-[var(--text-muted)]">
+                                            {fmtTs(e.timestamp)}
+                                        </span>
+                                        <span className="font-semibold">
+                                            {fmtUsd(e.totalUsd)}
+                                        </span>
+                                    </div>
+                                ))}
                             </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
+                        </div>
 
-            <div className="px-5 pb-5 grid gap-3 lg:grid-cols-2">
-                <div className="border border-[var(--border-color)] p-3">
-                    <p className="text-[12px] font-semibold mb-2">
-                        Coverage theo tháng
-                    </p>
-                    <div className="space-y-2 max-h-[280px] overflow-auto thin-scrollbar pr-1">
-                        {stats.byMonth.map((m) => (
-                            <BarRow
-                                key={m.month}
-                                label={m.month}
-                                value={m.coveragePct}
-                                right={`${m.observed}/${m.expected}`}
-                                color={
-                                    m.month === hoverMonth
-                                        ? "var(--danger-text)"
-                                        : "var(--color-accent)"
-                                }
-                            />
-                        ))}
+                        <div className="border border-[var(--border-color)] p-3">
+                            <p className="text-[12px] font-semibold mb-2">
+                                Top Missing Gaps
+                            </p>
+                            <div className="space-y-1 text-[11px]">
+                                {stats.topGaps.length === 0 && (
+                                    <p className="text-[var(--text-muted)]">
+                                        Không có gap &gt; 1h.
+                                    </p>
+                                )}
+                                {stats.topGaps.slice(0, 10).map((g) => (
+                                    <div
+                                        key={`${g.from}-${g.to}`}
+                                        className={`flex justify-between gap-3 px-2 py-1 ${hoverIso && hoverIso >= g.from && hoverIso <= g.to ? "bg-[var(--bg-secondary)]" : ""}`}
+                                    >
+                                        <span className="text-[var(--text-muted)]">
+                                            {fmtTs(g.from)} - {fmtTs(g.to)}
+                                        </span>
+                                        <span className="font-semibold">
+                                            {g.missingHours}h
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     </div>
-                </div>
 
-                <div className="border border-[var(--border-color)] p-3">
-                    <p className="text-[12px] font-semibold mb-2">
-                        Khung giờ UTC nóng nhất
-                    </p>
-                    <div className="space-y-2">
-                        {stats.byHour.slice(0, 10).map((h) => (
-                            <BarRow
-                                key={h.hour}
-                                label={`${String(h.hour).padStart(2, "0")}:00`}
-                                value={
-                                    stats.byHour[0]?.avgUsd
-                                        ? (h.avgUsd / stats.byHour[0].avgUsd) *
-                                          100
-                                        : 0
-                                }
-                                right={fmtUsd(h.avgUsd)}
-                                color={
-                                    hoverIso &&
-                                    Number(hoverIso.slice(11, 13)) === h.hour
-                                        ? "var(--danger-text)"
-                                        : "var(--success-text)"
-                                }
-                            />
-                        ))}
-                    </div>
-                </div>
-            </div>
+                    <div className="px-5 pb-5 grid gap-3 lg:grid-cols-2">
+                        <div className="border border-[var(--border-color)] p-3">
+                            <p className="text-[12px] font-semibold mb-2">
+                                Coverage theo tháng
+                            </p>
+                            <div className="space-y-2 max-h-[280px] overflow-auto thin-scrollbar pr-1">
+                                {stats.byMonth.map((m) => (
+                                    <BarRow
+                                        key={m.month}
+                                        label={m.month}
+                                        value={m.coveragePct}
+                                        right={`${m.observed}/${m.expected}`}
+                                        color={
+                                            m.month === hoverMonth
+                                                ? "var(--danger-text)"
+                                                : "var(--color-accent)"
+                                        }
+                                    />
+                                ))}
+                            </div>
+                        </div>
 
-            <div className="px-5 pb-5 grid gap-3 lg:grid-cols-2">
-                <div className="border border-[var(--border-color)] p-3">
-                    <p className="text-[12px] font-semibold mb-2">
-                        Ngày trong tuần nóng nhất (UTC)
-                    </p>
-                    <div className="space-y-2">
-                        {stats.byWeekday.map((d) => (
-                            <BarRow
-                                key={d.weekday}
-                                label={weekdayNames[d.weekday]}
-                                value={
-                                    stats.byWeekday[0]?.avgUsd
-                                        ? (d.avgUsd /
-                                              stats.byWeekday[0].avgUsd) *
-                                          100
-                                        : 0
-                                }
-                                right={fmtUsd(d.avgUsd)}
-                                color={
-                                    hoverIso &&
-                                    new Date(hoverIso).getUTCDay() === d.weekday
-                                        ? "var(--danger-text)"
-                                        : "var(--color-accent)"
-                                }
-                            />
-                        ))}
+                        <div className="border border-[var(--border-color)] p-3">
+                            <p className="text-[12px] font-semibold mb-2">
+                                Khung giờ UTC nóng nhất
+                            </p>
+                            <div className="space-y-2">
+                                {stats.byHour.slice(0, 10).map((h) => (
+                                    <BarRow
+                                        key={h.hour}
+                                        label={`${String(h.hour).padStart(2, "0")}:00`}
+                                        value={
+                                            stats.byHour[0]?.avgUsd
+                                                ? (h.avgUsd / stats.byHour[0].avgUsd) *
+                                                  100
+                                                : 0
+                                        }
+                                        right={fmtUsd(h.avgUsd)}
+                                        color={
+                                            hoverIso &&
+                                            Number(hoverIso.slice(11, 13)) === h.hour
+                                                ? "var(--danger-text)"
+                                                : "var(--success-text)"
+                                        }
+                                    />
+                                ))}
+                            </div>
+                        </div>
                     </div>
-                </div>
 
-                <div className="border border-[var(--border-color)] p-3">
-                    <p className="text-[12px] font-semibold mb-2">
-                        Phân bố mức Liquidation
-                    </p>
-                    <div className="space-y-2">
-                        {stats.distribution.map((d) => (
-                            <BarRow
-                                key={d.label}
-                                label={d.label}
-                                value={
-                                    stats.summary.rows
-                                        ? (d.count / stats.summary.rows) * 100
-                                        : 0
-                                }
-                                right={`${d.count} rows`}
-                                color="var(--success-text)"
-                            />
-                        ))}
+                    <div className="px-5 pb-5 grid gap-3 lg:grid-cols-2">
+                        <div className="border border-[var(--border-color)] p-3">
+                            <p className="text-[12px] font-semibold mb-2">
+                                Ngày trong tuần nóng nhất (UTC)
+                            </p>
+                            <div className="space-y-2">
+                                {stats.byWeekday.map((d) => (
+                                    <BarRow
+                                        key={d.weekday}
+                                        label={weekdayNames[d.weekday]}
+                                        value={
+                                            stats.byWeekday[0]?.avgUsd
+                                                ? (d.avgUsd /
+                                                      stats.byWeekday[0].avgUsd) *
+                                                  100
+                                                : 0
+                                        }
+                                        right={fmtUsd(d.avgUsd)}
+                                        color={
+                                            hoverIso &&
+                                            new Date(hoverIso).getUTCDay() === d.weekday
+                                                ? "var(--danger-text)"
+                                                : "var(--color-accent)"
+                                        }
+                                    />
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="border border-[var(--border-color)] p-3">
+                            <p className="text-[12px] font-semibold mb-2">
+                                Phân bố mức Liquidation
+                            </p>
+                            <div className="space-y-2">
+                                {stats.distribution.map((d) => (
+                                    <BarRow
+                                        key={d.label}
+                                        label={d.label}
+                                        value={
+                                            stats.summary.rows
+                                                ? (d.count / stats.summary.rows) * 100
+                                                : 0
+                                        }
+                                        right={`${d.count} rows`}
+                                        color="var(--success-text)"
+                                    />
+                                ))}
+                            </div>
+                        </div>
                     </div>
-                </div>
-            </div>
+                </>
+            ) : null}
 
             <div className="px-5 pb-5">
                 <div className="border border-[var(--border-color)] p-3">
@@ -2409,10 +2923,16 @@ export default function AnalysisDashboard({
                                             {fmtTs(e.exitTs)}
                                         </td>
                                         <td className="py-2">
-                                            {pctFmt.format(e.ret * 100)}%
+                                            {Number.isFinite(e.ret)
+                                                ? `${pctFmt.format(e.ret * 100)}%`
+                                                : "N/A"}
                                         </td>
                                         <td className="py-2 font-semibold">
-                                            {e.win ? "WIN" : "LOSE"}
+                                            {Number.isFinite(e.ret)
+                                                ? e.win
+                                                    ? "WIN"
+                                                    : "LOSE"
+                                                : "PENDING"}
                                         </td>
                                         <td className="py-2 text-right">
                                             <button
@@ -2819,13 +3339,46 @@ function InputSmall({ label, value, onChange, info }) {
     );
 }
 
-function ThWithInfo({ label, info }) {
+function ThWithInfo({
+    label,
+    info,
+    sortable = false,
+    sortKey = "",
+    activeSort = null,
+    onSort = null,
+}) {
+    const isActive = sortable && activeSort?.key === sortKey;
+    const dir = isActive ? activeSort?.dir : null;
+    const arrow = dir === "asc" ? "↑" : dir === "desc" ? "↓" : "";
+    const handleSort = () => {
+        if (!sortable || !onSort || !sortKey) return;
+        onSort((prev) => {
+            if (prev?.key === sortKey) {
+                return { key: sortKey, dir: prev.dir === "asc" ? "desc" : "asc" };
+            }
+            return { key: sortKey, dir: "desc" };
+        });
+    };
     return (
         <th className="py-2">
-            <span>
-                {label}
-                <InfoHint text={info} />
-            </span>
+            {sortable ? (
+                <button
+                    type="button"
+                    className="inline-flex items-center gap-1 hover:text-[var(--text-main)]"
+                    onClick={handleSort}
+                >
+                    <span>{label}</span>
+                    <span className="text-[10px] min-w-[10px] text-left">
+                        {arrow}
+                    </span>
+                    <InfoHint text={info} />
+                </button>
+            ) : (
+                <span>
+                    {label}
+                    <InfoHint text={info} />
+                </span>
+            )}
         </th>
     );
 }
