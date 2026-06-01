@@ -11,7 +11,7 @@ export default async function Analysis3Page({ searchParams }) {
     : (datasets.includes(defaultName) ? defaultName : datasets[0]);
 
   const cascadeOptions = {
-    q: Number(params?.q || 0.99),
+    q: Number(params?.q || 0.95),
     minLongShare: Number(params?.minLongShare || 0.8),
     zMin: Number(params?.zMin || 1.5),
     zWindowHours: Number(params?.zWindowHours || 168),
