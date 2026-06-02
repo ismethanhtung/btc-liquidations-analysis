@@ -1,0 +1,73 @@
+{
+  "generatedAt": "2026-06-02T05:57:52.594Z",
+  "requested": {
+    "interval": "1h",
+    "years": 1,
+    "exchangeList": "Binance,Bybit,OKX",
+    "startMs": 1748843870091,
+    "endMs": 1780379870091,
+    "startIso": "2025-06-02T05:57:50.091Z",
+    "endIso": "2026-06-02T05:57:50.091Z"
+  },
+  "sources": {
+    "liquidation": {
+      "name": "liquidation",
+      "earliestAcceptedStartTime": null,
+      "rows": 4316,
+      "firstTimestamp": 1764828000000,
+      "lastTimestamp": 1780376400000,
+      "firstIso": "2025-12-04T06:00:00.000Z",
+      "lastIso": "2026-06-02T05:00:00.000Z"
+    },
+    "oi": {
+      "name": "oi",
+      "earliestAcceptedStartTime": 1764827870000,
+      "rows": 4316,
+      "firstTimestamp": 1764828000000,
+      "lastTimestamp": 1780376400000,
+      "firstIso": "2025-12-04T06:00:00.000Z",
+      "lastIso": "2026-06-02T05:00:00.000Z"
+    },
+    "funding": {
+      "name": "funding",
+      "earliestAcceptedStartTime": 1764827870000,
+      "rows": 4316,
+      "firstTimestamp": 1764828000000,
+      "lastTimestamp": 1780376400000,
+      "firstIso": "2025-12-04T06:00:00.000Z",
+      "lastIso": "2026-06-02T05:00:00.000Z"
+    },
+    "oiWeight": {
+      "name": "oiWeight",
+      "earliestAcceptedStartTime": 1764827870000,
+      "rows": 4316,
+      "firstTimestamp": 1764828000000,
+      "lastTimestamp": 1780376400000,
+      "firstIso": "2025-12-04T06:00:00.000Z",
+      "lastIso": "2026-06-02T05:00:00.000Z"
+    },
+    "cvd": {
+      "name": "cvd",
+      "earliestAcceptedStartTime": null,
+      "rows": 4316,
+      "firstTimestamp": 1764828000000,
+      "lastTimestamp": 1780376400000,
+      "firstIso": "2025-12-04T06:00:00.000Z",
+      "lastIso": "2026-06-02T05:00:00.000Z"
+    },
+    "price": {
+      "rows": 8760,
+      "firstTimestamp": 1748844000000,
+      "lastTimestamp": 1780376400000,
+      "firstIso": "2025-06-02T06:00:00.000Z",
+      "lastIso": "2026-06-02T05:00:00.000Z"
+    }
+  },
+  "merged": {
+    "rows": 4312,
+    "firstTimestamp": 1764828000000,
+    "lastTimestamp": 1780376400000,
+    "firstIso": "2025-12-04T06:00:00.000Z",
+    "lastIso": "2026-06-02T05:00:00.000Z"
+  }
+}
