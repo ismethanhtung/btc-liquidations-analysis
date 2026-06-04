@@ -38,6 +38,7 @@ export async function POST(req) {
       ? null
       : Number(body.fitK);
     const hmmIterations = Number(body?.hmmIterations ?? 10);
+    const selectedFeatures = Array.isArray(body?.selectedFeatures) ? body.selectedFeatures : null;
 
     const result = source === "api"
       ? await buildPhatich4RegimeAnalysis({
@@ -49,12 +50,14 @@ export async function POST(req) {
           maxK,
           fitK,
           hmmIterations,
+          selectedFeatures,
         })
       : buildPhatich4RegimeAnalysisFromDataset({
           dataset: body?.dataset,
           maxK,
           fitK,
           hmmIterations,
+          selectedFeatures,
         });
 
     return NextResponse.json({ ok: true, ...result });
