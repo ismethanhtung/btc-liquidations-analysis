@@ -37,6 +37,10 @@ function safeNum(v, fallback = 0) {
 
 function intervalToMs(interval) {
   switch (String(interval || "1h")) {
+    case "5m":
+      return 5 * MS.min;
+    case "15m":
+      return 15 * MS.min;
     case "30m":
       return 30 * MS.min;
     case "4h":

@@ -1,0 +1,73 @@
+{
+  "generatedAt": "2026-06-08T15:48:39.175Z",
+  "requested": {
+    "interval": "30m",
+    "years": 0.05,
+    "exchangeList": "Binance,Bybit,OKX",
+    "startMs": 1779356918188,
+    "endMs": 1780933718188,
+    "startIso": "2026-05-21T09:48:38.188Z",
+    "endIso": "2026-06-08T15:48:38.188Z"
+  },
+  "sources": {
+    "liquidation": {
+      "name": "liquidation",
+      "earliestAcceptedStartTime": null,
+      "rows": 876,
+      "firstTimestamp": 1779357600000,
+      "lastTimestamp": 1780932600000,
+      "firstIso": "2026-05-21T10:00:00.000Z",
+      "lastIso": "2026-06-08T15:30:00.000Z"
+    },
+    "oi": {
+      "name": "oi",
+      "earliestAcceptedStartTime": null,
+      "rows": 876,
+      "firstTimestamp": 1779357600000,
+      "lastTimestamp": 1780932600000,
+      "firstIso": "2026-05-21T10:00:00.000Z",
+      "lastIso": "2026-06-08T15:30:00.000Z"
+    },
+    "funding": {
+      "name": "funding",
+      "earliestAcceptedStartTime": null,
+      "rows": 876,
+      "firstTimestamp": 1779357600000,
+      "lastTimestamp": 1780932600000,
+      "firstIso": "2026-05-21T10:00:00.000Z",
+      "lastIso": "2026-06-08T15:30:00.000Z"
+    },
+    "oiWeight": {
+      "name": "oiWeight",
+      "earliestAcceptedStartTime": null,
+      "rows": 876,
+      "firstTimestamp": 1779357600000,
+      "lastTimestamp": 1780932600000,
+      "firstIso": "2026-05-21T10:00:00.000Z",
+      "lastIso": "2026-06-08T15:30:00.000Z"
+    },
+    "cvd": {
+      "name": "cvd",
+      "earliestAcceptedStartTime": null,
+      "rows": 876,
+      "firstTimestamp": 1779357600000,
+      "lastTimestamp": 1780932600000,
+      "firstIso": "2026-05-21T10:00:00.000Z",
+      "lastIso": "2026-06-08T15:30:00.000Z"
+    },
+    "price": {
+      "rows": 876,
+      "firstTimestamp": 1779357600000,
+      "lastTimestamp": 1780932600000,
+      "firstIso": "2026-05-21T10:00:00.000Z",
+      "lastIso": "2026-06-08T15:30:00.000Z"
+    }
+  },
+  "merged": {
+    "rows": 876,
+    "firstTimestamp": 1779357600000,
+    "lastTimestamp": 1780932600000,
+    "firstIso": "2026-05-21T10:00:00.000Z",
+    "lastIso": "2026-06-08T15:30:00.000Z"
+  }
+}

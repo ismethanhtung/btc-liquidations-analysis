@@ -160,7 +160,7 @@ function FieldLabel({ children, icon: Icon }) {
   );
 }
 
-export default function Phatich4Dashboard() {
+export default function Phatich5Dashboard() {
   const chartRef = useRef(null);
   const chartApiRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -319,7 +319,7 @@ export default function Phatich4Dashboard() {
       setDatasetsLoading(true);
       setError("");
       try {
-        const res = await fetch("/api/phatich4/regime", { cache: "no-store" });
+        const res = await fetch("/api/phatich5/regime", { cache: "no-store" });
         const json = await res.json();
         if (!res.ok || !json?.ok) throw new Error(json?.error || `Dataset request failed: ${res.status}`);
         if (!mounted) return;
@@ -343,18 +343,12 @@ export default function Phatich4Dashboard() {
     runAnalysis(selectedDataset);
   }, [selectedDataset]);
 
-  useEffect(() => {
-    if (result?.states) {
-      setActiveRadarStates(new Set(result.states.map(s => s.state)));
-    }
-  }, [result]);
-
   async function runAnalysis(dataset = selectedDataset, overrideParams = null) {
     const p = overrideParams || params;
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/phatich4/regime", {
+      const res = await fetch("/api/phatich5/regime", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -371,6 +365,9 @@ export default function Phatich4Dashboard() {
         throw new Error(json?.error || `Request failed: ${res.status}`);
       }
       setResult(json);
+      if (json?.states) {
+        setActiveRadarStates(new Set(json.states.map(s => s.state)));
+      }
       setSelectedTime(null);
     } catch (err) {
       setError(err?.message || "Failed to build regime model.");
@@ -407,7 +404,7 @@ export default function Phatich4Dashboard() {
         <div className="panel-header px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-[18px] font-semibold leading-6">Phan tich 4 - Regime Routing</h1>
+              <h1 className="text-[18px] font-semibold leading-6">Phan tich 5 - Regime Routing (Short-term)</h1>
               <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
                 HMM regime model tu dataset local: liquidation, funding, OI, OI-weight funding, CVD va price.
               </p>
@@ -487,7 +484,7 @@ export default function Phatich4Dashboard() {
                 setDatasetsLoading(true);
                 setError("");
                 try {
-                  const res = await fetch("/api/phatich4/regime", { cache: "no-store" });
+                  const res = await fetch("/api/phatich5/regime", { cache: "no-store" });
                   const json = await res.json();
                   if (!res.ok || !json?.ok) throw new Error(json?.error || `Dataset request failed: ${res.status}`);
                   setDatasets(json.datasets || []);
@@ -3147,3 +3144,4 @@ function OverlaidRadarChart({ cx = 170, cy = 170, r = 110, axes, statesData, act
     </svg>
   );
 }
+

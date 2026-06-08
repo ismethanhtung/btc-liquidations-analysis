@@ -14,6 +14,7 @@ const navItems = [
   { href: "/analysis-2", label: "Phan tich 2", icon: FlaskConical },
   { href: "/analysis-3", label: "Phan tich 3", icon: FlaskConical },
   { href: "/phatich4", label: "Phan tich 4", icon: FlaskConical },
+  { href: "/phatich5", label: "Phan tich 5", icon: FlaskConical },
   { href: "/settings", label: "Display", icon: Settings }
 ];
 
