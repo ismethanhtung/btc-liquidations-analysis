@@ -8,13 +8,14 @@ import {
 export async function GET() {
   try {
     const allDatasets = listPhatich4RegimeDatasets();
-    const datasets = allDatasets.filter(
+    const datasets = allDatasets;
+    const defaultDataset = datasets.find(
       (file) => file.includes("binance") || file.includes("5m")
-    );
+    ) || datasets[0] || null;
     return NextResponse.json({
       ok: true,
       datasets,
-      defaultDataset: datasets[0] || null,
+      defaultDataset,
     });
   } catch (err) {
     return NextResponse.json(

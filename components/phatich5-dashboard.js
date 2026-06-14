@@ -21,6 +21,7 @@ import {
   Table2,
   Waves,
 } from "lucide-react";
+import Phatich5PolymarketPanel from "@/components/phatich5-polymarket-panel";
 
 const pctFmt = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
@@ -160,6 +161,99 @@ function FieldLabel({ children, icon: Icon }) {
   );
 }
 
+
+function intervalToMs(interval) {
+  const str = String(interval || "1h").trim().toLowerCase();
+  const match = str.match(/^(\d+)([mhd])$/);
+  if (match) {
+    const val = Number(match[1]);
+    const unit = match[2];
+    if (unit === "m") return val * 60000;
+    if (unit === "h") return val * 3600000;
+    if (unit === "d") return val * 86400000;
+  }
+  if (str === "30m") return 30 * 60000;
+  if (str === "4h") return 4 * 3600000;
+  if (str === "1d") return 24 * 3600000;
+  return 3600000;
+}
+
+function hoursToSteps(hours, interval) {
+  const ms = intervalToMs(interval);
+  if (ms <= 0) return hours;
+  return Math.round((hours * 3600000) / ms);
+}
+
+function tintColor(state, k) {
+  const palette = ["#2563eb", "#dc2626", "#16a34a", "#7c3aed", "#d97706", "#0891b2", "#be185d", "#475569"];
+  return palette[state % Math.max(1, k)] || "#475569";
+}
+
+function fmtDurationHours(bars, interval) {
+  const hours = (bars * intervalToMs(interval)) / 3600000;
+  if (hours < 1) {
+    const mins = Math.round(hours * 60);
+    return `${mins} phút`;
+  }
+  return `${hours.toFixed(1)} giờ`;
+}
+
+function computeDurationDependentRollout(currState, currentDuration, empiricalTransitions, baseTransMatrix, steps) {
+  const K = baseTransMatrix.length;
+  const stateProbs = Array.from({ length: steps + 1 }, () => Array(K).fill(0));
+  
+  let jointDist = Array.from({ length: K }, () => ({}));
+  jointDist[currState][currentDuration] = 1.0;
+  stateProbs[0][currState] = 1.0;
+  
+  for (let h = 1; h <= steps; h++) {
+    const nextJointDist = Array.from({ length: K }, () => ({}));
+    
+    for (let s = 0; s < K; s++) {
+      const baseTrans = baseTransMatrix[s] || [];
+      const empTransMap = empiricalTransitions[s] || {};
+      
+      const empDurations = Object.keys(empTransMap).map(Number);
+      const maxDur = empDurations.length ? Math.max(...empDurations) : 0;
+      
+      for (const dStr in jointDist[s]) {
+        const d = Number(dStr);
+        const pJoint = jointDist[s][d];
+        if (pJoint <= 0) continue;
+        
+        let trans = empTransMap[d];
+        if (!trans) {
+          trans = maxDur > 0 && d > maxDur ? empTransMap[maxDur] : baseTrans;
+        }
+        
+        for (let ns = 0; ns < K; ns++) {
+          const pTrans = trans[ns] || 0;
+          const pNext = pJoint * pTrans;
+          if (pNext <= 0) continue;
+          
+          if (ns === s) {
+            const nextD = d + 1;
+            nextJointDist[s][nextD] = (nextJointDist[s][nextD] || 0) + pNext;
+          } else {
+            nextJointDist[ns][1] = (nextJointDist[ns][1] || 0) + pNext;
+          }
+        }
+      }
+    }
+    
+    jointDist = nextJointDist;
+    for (let s = 0; s < K; s++) {
+      let sum = 0;
+      for (const dStr in jointDist[s]) {
+        sum += jointDist[s][dStr];
+      }
+      stateProbs[h][s] = sum;
+    }
+  }
+  
+  return { stateProbs };
+}
+
 export default function Phatich5Dashboard() {
   const chartRef = useRef(null);
   const chartApiRef = useRef(null);
@@ -212,28 +306,194 @@ export default function Phatich5Dashboard() {
     )) || null;
   }, [result, selectedPoint]);
 
-  const currState = selectedPoint !== null ? selectedPoint.state : (result?.latest?.state ?? 0);
+    const currState = selectedPoint !== null ? selectedPoint.state : (result?.latest?.state ?? 0);
   const selectedStateObj = result?.states?.[currState];
 
   const displayTransitionProbs = useMemo(() => {
     if (!result) return [];
-    if (projectionTimeframe === "1h") {
-      const transRow = result.transitions?.[currState] || [];
-      return transRow.map((t) => ({
-        state: t.to,
-        label: `State ${t.to + 1}`,
-        probability: t.p,
-        color: t.color,
-      }));
+    const timeline = result.timeline || [];
+    let idx = selectedPoint ? timeline.findIndex(p => p.time === selectedPoint.time) : -1;
+    if (idx === -1 && timeline.length) {
+      idx = timeline.length - 1;
     }
-    const projRow = selectedStateObj?.projections?.[projectionTimeframe] || [];
-    return projRow.map((t) => ({
-      state: t.state,
-      label: t.label,
-      probability: t.p,
-      color: t.color,
+    if (idx === -1) return [];
+
+    const selectedCandle = timeline[idx];
+    const currState = selectedCandle.state;
+    
+    // Calculate current duration
+    let currentDuration = 1;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (timeline[i].state === currState) {
+        currentDuration++;
+      } else {
+        break;
+      }
+    }
+
+    const empiricalTransitions = result.empiricalTransitions || [];
+    const baseTransitions = result.transitions || [];
+    const K = result.meta?.chosenK || 2;
+    const baseTransMatrix = Array.from({ length: K }, () => Array(K).fill(0));
+    baseTransitions.forEach(row => {
+      row.forEach(cell => {
+        baseTransMatrix[cell.from][cell.to] = cell.p;
+      });
+    });
+
+    const interval = result.meta?.interval || "1h";
+    let steps = 1;
+    if (projectionTimeframe === "6h") steps = Math.max(1, hoursToSteps(6, interval));
+    else if (projectionTimeframe === "12h") steps = Math.max(1, hoursToSteps(12, interval));
+    else if (projectionTimeframe === "24h") steps = Math.max(1, hoursToSteps(24, interval));
+    else {
+      steps = Math.max(1, hoursToSteps(1, interval));
+    }
+
+    const rollout = computeDurationDependentRollout(
+      currState,
+      currentDuration,
+      empiricalTransitions,
+      baseTransMatrix,
+      steps
+    );
+
+    return rollout.stateProbs[steps].map((p, stateIdx) => ({
+      state: stateIdx,
+      label: `State ${stateIdx + 1}`,
+      probability: p,
+      color: tintColor(stateIdx, K)
     }));
-  }, [result, currState, selectedStateObj, projectionTimeframe]);
+  }, [result, selectedPoint, projectionTimeframe]);
+
+  const transitionTimingForecast = useMemo(() => {
+    if (!result) return null;
+    const timeline = result.timeline || [];
+    let idx = selectedPoint ? timeline.findIndex(p => p.time === selectedPoint.time) : -1;
+    if (idx === -1 && timeline.length) {
+      idx = timeline.length - 1;
+    }
+    if (idx === -1) return null;
+
+    const selectedCandle = timeline[idx];
+    const currState = selectedCandle.state;
+    
+    // Calculate duration
+    let currentDuration = 1;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (timeline[i].state === currState) {
+        currentDuration++;
+      } else {
+        break;
+      }
+    }
+
+    const empiricalTransitions = result.empiricalTransitions || [];
+    const baseTransitions = result.transitions || [];
+    const K = result.meta?.chosenK || 2;
+    const baseTransMatrix = Array.from({ length: K }, () => Array(K).fill(0));
+    baseTransitions.forEach(row => {
+      row.forEach(cell => {
+        baseTransMatrix[cell.from][cell.to] = cell.p;
+      });
+    });
+
+    const interval = result.meta?.interval || "1h";
+    const intervalMs = intervalToMs(interval);
+    
+    // Project forward up to 36 hours to find transition peaks
+    const maxHours = 36;
+    const maxSteps = Math.max(12, Math.round((maxHours * 3600000) / intervalMs));
+
+    const timingProbs = Array.from({ length: maxSteps + 1 }, () => Array(K).fill(0));
+    
+    let stayJointDist = {};
+    stayJointDist[currentDuration] = 1.0;
+    
+    for (let h = 1; h <= maxSteps; h++) {
+      const nextStayJointDist = {};
+      const baseTrans = baseTransMatrix[currState] || [];
+      const empTransMap = empiricalTransitions[currState] || {};
+      
+      const empDurations = Object.keys(empTransMap).map(Number);
+      const maxDur = empDurations.length ? Math.max(...empDurations) : 0;
+      
+      for (const dStr in stayJointDist) {
+        const d = Number(dStr);
+        const pJoint = stayJointDist[d];
+        if (pJoint <= 0) continue;
+        
+        let trans = empTransMap[d];
+        if (!trans) {
+          trans = maxDur > 0 && d > maxDur ? empTransMap[maxDur] : baseTrans;
+        }
+        
+        for (let ns = 0; ns < K; ns++) {
+          const pTrans = trans[ns] || 0;
+          const pNext = pJoint * pTrans;
+          if (pNext <= 0) continue;
+          
+          if (ns === currState) {
+            nextStayJointDist[d + 1] = (nextStayJointDist[d + 1] || 0) + pNext;
+          } else {
+            timingProbs[h][ns] += pNext;
+          }
+        }
+      }
+      stayJointDist = nextStayJointDist;
+    }
+
+    const forecasts = [];
+    for (let ns = 0; ns < K; ns++) {
+      if (ns === currState) continue;
+      
+      let peakStep = 0;
+      let peakProb = 0;
+      let cumulativeProb = 0;
+      
+      for (let h = 1; h <= maxSteps; h++) {
+        cumulativeProb += timingProbs[h][ns];
+        if (timingProbs[h][ns] > peakProb) {
+          peakProb = timingProbs[h][ns];
+          peakStep = h;
+        }
+      }
+      
+      const peakHours = (peakStep * intervalMs) / 3600000;
+      
+      forecasts.push({
+        state: ns,
+        label: `State ${ns + 1}`,
+        color: tintColor(ns, K),
+        peakStep,
+        peakHours,
+        peakProb,
+        cumulativeProb
+      });
+    }
+
+    let expectedRemainingSteps = 0;
+    let sumExitProb = 0;
+    for (let h = 1; h <= maxSteps; h++) {
+      let exitProbAtH = 0;
+      for (let ns = 0; ns < K; ns++) {
+        if (ns !== currState) exitProbAtH += timingProbs[h][ns];
+      }
+      expectedRemainingSteps += h * exitProbAtH;
+      sumExitProb += exitProbAtH;
+    }
+    if (sumExitProb > 0) {
+      expectedRemainingSteps = expectedRemainingSteps / sumExitProb;
+    }
+    const expectedRemainingHours = (expectedRemainingSteps * intervalMs) / 3600000;
+
+    return {
+      currentDuration,
+      expectedRemainingHours,
+      forecasts
+    };
+  }, [result, selectedPoint]);
+
   const timelineTail = useMemo(() => {
     const rows = result?.timeline || [];
     return rows.slice(Math.max(0, rows.length - 240));
@@ -396,6 +656,7 @@ export default function Phatich5Dashboard() {
     { key: "k", label: "K check" },
     { key: "validation", label: "Predictive Power" },
     { key: "radar", label: "Regime Radar" },
+    { key: "polymarket", label: "Polymarket" },
   ];
 
   return (
@@ -589,12 +850,12 @@ export default function Phatich5Dashboard() {
               helper="So lan regime segment trong lich su"
               icon={GitCommitHorizontal}
             />
-            <Metric
-              label="Selected K"
-              value={result ? fmtInt(result.meta?.chosenK) : "N/A"}
-              helper={result?.meta?.kSelection ? `mode=${result.meta.kSelection.method}, sil=${result.meta.kSelection.chosenBySilhouette}, elbow=${result.meta.kSelection.chosenByElbow}` : "K diagnostics"}
-              icon={BarChart3}
-            />
+	            <Metric
+	              label="Selected K"
+	              value={result ? fmtInt(result.meta?.chosenK) : "N/A"}
+	              helper={result?.meta?.kSelection ? `mode=${result.meta.kSelection.method}, score=${result.meta.kSelection.chosenByScore}, sil=${result.meta.kSelection.chosenBySilhouette}` : "K diagnostics"}
+	              icon={BarChart3}
+	            />
             <Metric
               label="Aligned rows"
               value={result ? fmtInt(result.meta?.rows) : "N/A"}
@@ -657,7 +918,7 @@ export default function Phatich5Dashboard() {
                   <SmallMetric label="OI" value={fmtNum(selectedPoint?.oiRet24, 3)} />
                   <SmallMetric label="Liq" value={fmtNum(selectedPoint?.liqShock, 3)} />
                 </div>
-                <div className="space-y-2 border border-[var(--border-color)] bg-[var(--bg-main)] px-3 py-2">
+                                <div className="space-y-2 border border-[var(--border-color)] bg-[var(--bg-main)] px-3 py-2">
                   <div className="flex items-center justify-between gap-2 border-b border-[var(--border-color)] pb-1.5">
                     <div className="text-[10px] uppercase text-[var(--text-muted)] font-semibold">State transitions</div>
                     <div className="flex gap-1">
@@ -692,7 +953,52 @@ export default function Phatich5Dashboard() {
                       <div className="text-[10px] text-[var(--text-muted)]">No transition data available</div>
                     )}
                   </div>
+
+                  {/* Duration-dependent transition timing forecast */}
+                  {transitionTimingForecast && (
+                    <div className="mt-3 pt-2.5 border-t border-[var(--border-color)]/50 space-y-1.5 text-[10px]">
+                      <div className="flex justify-between items-center text-[9px] uppercase tracking-wider text-[var(--text-muted)] font-semibold">
+                        <span>Transition Forecast</span>
+                        <span className="h-1.5 w-1.5 rounded-full bg-cyan-500 animate-pulse" />
+                      </div>
+                      
+                      <div className="bg-[var(--bg-secondary)] px-2 py-1.5 border border-[var(--border-color)]/60 space-y-0.5 rounded font-mono text-[9px]">
+                        <div className="flex justify-between">
+                          <span className="text-[var(--text-muted)]">Duration:</span>
+                          <span className="font-bold text-[var(--text-main)]">
+                            {transitionTimingForecast.currentDuration} nến ({fmtDurationHours(transitionTimingForecast.currentDuration, result?.meta?.interval)})
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-[var(--text-muted)]">Expected remaining:</span>
+                          <span className="font-bold text-amber-400">
+                            ~{transitionTimingForecast.expectedRemainingHours.toFixed(1)} giờ
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 pt-0.5">
+                        {transitionTimingForecast.forecasts.map(f => (
+                          <div key={f.state} className="flex items-center justify-between border-b border-[var(--border-color)]/20 pb-0.5 text-[9px]">
+                            <div className="flex items-center gap-1">
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: f.color }} />
+                              <span className="font-semibold" style={{ color: f.color }}>{f.label}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="font-bold text-[var(--text-main)]">
+                                {f.peakHours === 0 ? "N/A" : `sau ~${f.peakHours.toFixed(1)}h`}
+                              </span>
+                              <span className="text-[8px] text-[var(--text-muted)] ml-1">
+                                (đỉnh {fmtPct(f.peakProb)})
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 {selectedSegment ? (
                   <div className="space-y-2 border border-[var(--border-color)] bg-[var(--bg-main)] px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
@@ -927,7 +1233,7 @@ export default function Phatich5Dashboard() {
                 </div>
                 <div className="overflow-auto thin-scrollbar pt-2">
                   <div className="text-[12px] font-semibold text-[var(--text-main)] mb-2">Detailed K Evaluation Metrics</div>
-                  <table className="min-w-[800px] w-full text-[11px]">
+	                  <table className="min-w-[940px] w-full text-[11px]">
                     <thead>
                       <tr className="border-b border-[var(--border-color)] text-left text-[var(--text-muted)]">
                         <th className="py-2">K</th>
@@ -936,10 +1242,12 @@ export default function Phatich5Dashboard() {
                         <th className="py-2">Elbow Drop</th>
                         <th className="py-2">AIC</th>
                         <th className="py-2">BIC</th>
-                        <th className="py-2">Persistence</th>
-                        <th className="py-2">Balance</th>
-                        <th className="py-2">Interpretability</th>
-                        <th className="py-2">Score</th>
+	                        <th className="py-2">Persistence</th>
+	                        <th className="py-2">Balance</th>
+	                        <th className="py-2">Min share</th>
+	                        <th className="py-2">Max share</th>
+	                        <th className="py-2">Interpretability</th>
+	                        <th className="py-2">Score</th>
                         <th className="py-2 text-right">Action</th>
                       </tr>
                     </thead>
@@ -954,9 +1262,11 @@ export default function Phatich5Dashboard() {
                           <td className="py-2">{fmtPct(row.elbowDrop || 0)}</td>
                           <td className="py-2">{row.aic !== undefined ? fmtNum(row.aic, 0) : "N/A"}</td>
                           <td className="py-2">{row.bic !== undefined ? fmtNum(row.bic, 0) : "N/A"}</td>
-                          <td className="py-2">{row.persistence !== undefined ? fmtPct(row.persistence) : "N/A"}</td>
-                          <td className="py-2">{row.balance !== undefined ? fmtPct(row.balance) : "N/A"}</td>
-                          <td className="py-2 font-semibold" style={{ color: row.k === Number(result.meta.chosenK) ? "var(--color-accent)" : undefined }}>
+	                          <td className="py-2">{row.persistence !== undefined ? fmtPct(row.persistence) : "N/A"}</td>
+	                          <td className="py-2">{row.balance !== undefined ? fmtPct(row.balance) : "N/A"}</td>
+	                          <td className="py-2">{row.minShare !== undefined ? fmtPct(row.minShare) : "N/A"}</td>
+	                          <td className="py-2">{row.maxShare !== undefined ? fmtPct(row.maxShare) : "N/A"}</td>
+	                          <td className="py-2 font-semibold" style={{ color: row.k === Number(result.meta.chosenK) ? "var(--color-accent)" : undefined }}>
                             {row.interpretability !== undefined ? fmtPct(row.interpretability) : "N/A"}
                           </td>
                           <td className="py-2">{fmtNum(row.score, 3)}</td>
@@ -1392,6 +1702,15 @@ export default function Phatich5Dashboard() {
                   );
                 })()}
               </div>
+            ) : null}
+
+            {activeTab === "polymarket" ? (
+              <Phatich5PolymarketPanel
+                datasets={datasets}
+                selectedDataset={selectedDataset}
+                selectedFeatures={selectedFeatures}
+                params={params}
+              />
             ) : null}
 
           </div>
@@ -3144,4 +3463,3 @@ function OverlaidRadarChart({ cx = 170, cy = 170, r = 110, axes, statesData, act
     </svg>
   );
 }
-
