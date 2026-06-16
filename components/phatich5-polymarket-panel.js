@@ -235,10 +235,15 @@ function TradesTable({ rows }) {
         <tbody>
           {(rows || []).length ? (rows || []).map((row) => (
             <tr key={`${row.slug}-${row.entryTimestamp}`} className="border-b border-[var(--border-color)]/70 align-top">
-              <td className="max-w-[260px] px-3 py-2">
-                <div className="truncate font-semibold">{row.title}</div>
-                <div className="truncate text-[10px] text-[var(--text-muted)]">{row.slug}</div>
-              </td>
+	              <td className="max-w-[260px] px-3 py-2">
+	                <div className="truncate font-semibold">{row.title}</div>
+	                <div className="truncate text-[10px] text-[var(--text-muted)]">{row.slug}</div>
+	                {row.entryMode ? (
+	                  <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">
+	                    {row.entryMode}{row.evaluatedCandidates ? `, checked ${fmtNum(row.evaluatedCandidates, 0)} candles` : ""}
+	                  </div>
+	                ) : null}
+	              </td>
               <td className="px-3 py-2">{fmtTime(row.entryTimestamp)}</td>
               <td className="px-3 py-2">
                 <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: row.stateColor }} />
@@ -289,7 +294,11 @@ export default function Phatich5PolymarketPanel({
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const [settings, setSettings] = useState({
+    entryMode: "adaptive",
     entryDelayHours: 1,
+    scanStepMinutes: 5,
+    minEntryDelayMinutes: 5,
+    minTimeToResolveMinutes: 5,
     minEdge: 3.5,
     minStateSamples: 12,
     maxDailyMarkets: 180,
@@ -319,7 +328,11 @@ export default function Phatich5PolymarketPanel({
           maxK: params.maxK || 8,
           hmmIterations: params.hmmIterations || 10,
           selectedFeatures,
+          entryMode: settings.entryMode,
           entryDelayHours: Number(settings.entryDelayHours || 1),
+          scanStepMinutes: Number(settings.scanStepMinutes || 5),
+          minEntryDelayMinutes: Number(settings.minEntryDelayMinutes || 5),
+          minTimeToResolveMinutes: Number(settings.minTimeToResolveMinutes || 5),
           minEdge: Number(settings.minEdge || 3.5) / 100,
           minStateSamples: Number(settings.minStateSamples || 12),
           maxDailyMarkets: Number(settings.maxDailyMarkets || 180),
@@ -361,7 +374,18 @@ export default function Phatich5PolymarketPanel({
               </select>
             </label>
             <label>
-              <div className="mb-1 text-[10px] uppercase text-[var(--text-muted)]">Entry delay h</div>
+              <div className="mb-1 text-[10px] uppercase text-[var(--text-muted)]">Entry mode</div>
+              <select
+                className="input-ui h-9 w-full px-2 text-[12px]"
+                value={settings.entryMode}
+                onChange={(event) => setSettings((curr) => ({ ...curr, entryMode: event.target.value }))}
+              >
+                <option value="adaptive">Adaptive scan</option>
+                <option value="fixed">Fixed delay</option>
+              </select>
+            </label>
+            <label>
+              <div className="mb-1 text-[10px] uppercase text-[var(--text-muted)]">Fixed delay h</div>
               <input
                 className="input-ui h-9 w-full px-2 text-[12px]"
                 type="number"
@@ -370,6 +394,42 @@ export default function Phatich5PolymarketPanel({
                 step="0.25"
                 value={settings.entryDelayHours}
                 onChange={(event) => setSettings((curr) => ({ ...curr, entryDelayHours: Number(event.target.value || 1) }))}
+              />
+            </label>
+            <label>
+              <div className="mb-1 text-[10px] uppercase text-[var(--text-muted)]">Scan step min</div>
+              <input
+                className="input-ui h-9 w-full px-2 text-[12px]"
+                type="number"
+                min="1"
+                max="60"
+                step="1"
+                value={settings.scanStepMinutes}
+                onChange={(event) => setSettings((curr) => ({ ...curr, scanStepMinutes: Number(event.target.value || 5) }))}
+              />
+            </label>
+            <label>
+              <div className="mb-1 text-[10px] uppercase text-[var(--text-muted)]">Min delay min</div>
+              <input
+                className="input-ui h-9 w-full px-2 text-[12px]"
+                type="number"
+                min="0"
+                max="240"
+                step="5"
+                value={settings.minEntryDelayMinutes}
+                onChange={(event) => setSettings((curr) => ({ ...curr, minEntryDelayMinutes: Number(event.target.value || 5) }))}
+              />
+            </label>
+            <label>
+              <div className="mb-1 text-[10px] uppercase text-[var(--text-muted)]">Min left min</div>
+              <input
+                className="input-ui h-9 w-full px-2 text-[12px]"
+                type="number"
+                min="0"
+                max="240"
+                step="5"
+                value={settings.minTimeToResolveMinutes}
+                onChange={(event) => setSettings((curr) => ({ ...curr, minTimeToResolveMinutes: Number(event.target.value || 5) }))}
               />
             </label>
             <label>
@@ -433,18 +493,18 @@ export default function Phatich5PolymarketPanel({
         <div className="border border-[var(--border-color)] bg-[var(--bg-main)] px-3 py-3">
           <div className="text-[12px] font-semibold">What this answers</div>
           <div className="mt-2 space-y-2 text-[11px] text-[var(--text-muted)]">
-            <div className="flex gap-2">
-              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>For a live 1D event: estimate fair P(Up), compare with executable odds, then output buy/skip and max bid.</span>
-            </div>
+	            <div className="flex gap-2">
+	              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+	              <span>Adaptive mode checks each candle inside the market window and enters only when current edge clears the filters.</span>
+	            </div>
             <div className="flex gap-2">
               <BarChart3 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>For 4H: fetch listed `btc-updown-4h-*` markets when available; use synthetic 4H only as a fallback research view.</span>
             </div>
             <div className="flex gap-2">
               <CircleDollarSign className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>Costs include conservative slippage and Polymarket taker fee formula for crypto markets.</span>
-            </div>
+	              <span>Costs include conservative slippage and Polymarket taker fee formula for crypto markets.</span>
+	            </div>
           </div>
         </div>
       </div>
@@ -458,10 +518,11 @@ export default function Phatich5PolymarketPanel({
 
       {result ? (
         <>
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-            <Metric label="Dataset" value={result.meta?.dataset || "N/A"} helper={`${fmtTime(result.meta?.regimeStartTime)} -> ${fmtTime(result.meta?.regimeEndTime)}`} icon={BarChart3} />
-            <Metric label="Regime K" value={fmtNum(result.meta?.chosenK, 0)} helper={`min state samples ${fmtNum(result.meta?.minStateSamples, 0)}`} icon={ShieldCheck} />
-            <Metric label="Daily samples" value={fmtNum(result.meta?.dailySamples, 0)} helper={`${fmtNum(result.meta?.marketEventsFetched, 0)} Gamma events fetched`} icon={ShieldCheck} />
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
+	            <Metric label="Dataset" value={result.meta?.dataset || "N/A"} helper={`${fmtTime(result.meta?.regimeStartTime)} -> ${fmtTime(result.meta?.regimeEndTime)}`} icon={BarChart3} />
+	            <Metric label="Regime K" value={fmtNum(result.meta?.chosenK, 0)} helper={`min state samples ${fmtNum(result.meta?.minStateSamples, 0)}`} icon={ShieldCheck} />
+	            <Metric label="Entry mode" value={result.meta?.entryMode || "N/A"} helper={result.meta?.entryMode === "adaptive" ? `${fmtNum(result.meta?.fourHourAdaptiveCandidates, 0)} 4H scan points` : `fixed ${fmtNum(result.meta?.entryDelayHours, 2)}h`} icon={CircleDollarSign} />
+	            <Metric label="Daily samples" value={fmtNum(result.meta?.dailySamples, 0)} helper={`${fmtNum(result.meta?.marketEventsFetched, 0)} Gamma events fetched`} icon={ShieldCheck} />
             <Metric label="Daily PnL" value={fmtNum(result.dailyBacktest?.summary?.totalPnl, 3)} helper={`trades ${fmtNum(result.dailyBacktest?.summary?.trades, 0)}, hit ${fmtProb(result.dailyBacktest?.summary?.hitRate)}`} icon={ArrowUp} />
             <Metric label="4H PnL" value={fmtNum(result.fourHourBacktest?.summary?.totalPnl, 3)} helper={`trades ${fmtNum(result.fourHourBacktest?.summary?.trades, 0)}, hit ${fmtProb(result.fourHourBacktest?.summary?.hitRate)}`} icon={ArrowDown} />
           </div>
