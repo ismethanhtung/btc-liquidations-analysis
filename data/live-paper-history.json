@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "createdAt": "2026-06-20T10:14:36.514Z",
+  "updatedAt": "2026-06-20T10:15:08.127Z",
+  "runs": [
+    {
+      "id": "run_1781950476514_utdnlt",
+      "startedAt": "2026-06-20T10:14:36.514Z",
+      "finishedAt": "2026-06-20T10:15:08.127Z",
+      "status": "ok",
+      "source": "local",
+      "dataset": "coinglass_BTC_regime_binance_5m_14d.csv",
+      "interval": "5m",
+      "chosenK": 4,
+      "storage": "local",
+      "opened": 0,
+      "settled": 0,
+      "skipped": [
+        {
+          "horizon": "1D",
+          "action": "N/A",
+          "reason": "no executable signal"
+        },
+        {
+          "horizon": "4H",
+          "action": "N/A",
+          "reason": "no executable signal"
+        }
+      ],
+      "warnings": [
+        "Realtime regime failed, fell back to local dataset: Coinglass API error from https://open-api-v4.coinglass.com/api/futures/funding-rate/oi-weight-history?symbol=BTC&interval=5m&limit=1000&start_time=1780373676514&end_time=1780673676514: The requested interval is not available for your current API plan."
+      ]
+    }
+  ],
+  "trades": []
+}
