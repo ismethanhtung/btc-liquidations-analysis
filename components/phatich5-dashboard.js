@@ -22,6 +22,7 @@ import {
   Waves,
 } from "lucide-react";
 import Phatich5PolymarketPanel from "@/components/phatich5-polymarket-panel";
+import Phatich5LivePaperPanel from "@/components/phatich5-live-paper-panel";
 
 const pctFmt = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
@@ -657,6 +658,7 @@ export default function Phatich5Dashboard() {
     { key: "validation", label: "Predictive Power" },
     { key: "radar", label: "Regime Radar" },
     { key: "polymarket", label: "Polymarket" },
+    { key: "paper", label: "Paper Live" },
   ];
 
   return (
@@ -1711,6 +1713,10 @@ export default function Phatich5Dashboard() {
                 selectedFeatures={selectedFeatures}
                 params={params}
               />
+            ) : null}
+
+            {activeTab === "paper" ? (
+              <Phatich5LivePaperPanel />
             ) : null}
 
           </div>

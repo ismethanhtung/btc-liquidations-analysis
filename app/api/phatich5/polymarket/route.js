@@ -8,7 +8,13 @@ export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}));
     const result = await buildPolymarketBtcUpDownResearch({
+      source: body?.source === "api" ? "api" : "local",
       dataset: body?.dataset,
+      apiKey: process.env.COINGLASS_API_KEY,
+      years: Number(body?.years ?? 0.05),
+      interval: String(body?.interval ?? "5m"),
+      exchangeList: String(body?.exchangeList ?? "Binance"),
+      symbol: String(body?.symbol ?? "BTC"),
       fitK: body?.fitK === "auto" || body?.fitK == null || body?.fitK === ""
         ? null
         : Number(body.fitK),

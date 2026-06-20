@@ -10,6 +10,7 @@
     "fetch:data": "node scripts/fetch-liquidation-data.mjs"
   },
   "dependencies": {
+    "@vercel/blob": "^2.4.1",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^0.468.0",
     "next": "15.1.11",

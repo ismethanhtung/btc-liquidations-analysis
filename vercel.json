@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/phatich5/live-paper/run",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
