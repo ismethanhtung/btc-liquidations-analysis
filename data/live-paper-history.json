@@ -1,7 +1,7 @@
 {
   "version": 1,
   "createdAt": "2026-06-20T10:14:36.514Z",
-  "updatedAt": "2026-06-20T10:15:08.127Z",
+  "updatedAt": "2026-06-22T05:57:25.670Z",
   "runs": [
     {
       "id": "run_1781950476514_utdnlt",
@@ -30,7 +30,229 @@
       "warnings": [
         "Realtime regime failed, fell back to local dataset: Coinglass API error from https://open-api-v4.coinglass.com/api/futures/funding-rate/oi-weight-history?symbol=BTC&interval=5m&limit=1000&start_time=1780373676514&end_time=1780673676514: The requested interval is not available for your current API plan."
       ]
+    },
+    {
+      "id": "run_1782103168783_7tf5sv",
+      "startedAt": "2026-06-22T04:39:28.783Z",
+      "finishedAt": "2026-06-22T04:39:53.261Z",
+      "status": "ok",
+      "source": "local",
+      "dataset": "coinglass_BTC_regime_binance_5m_14d.csv",
+      "interval": "5m",
+      "chosenK": 4,
+      "storage": "local",
+      "opened": 2,
+      "settled": 0,
+      "skipped": [],
+      "warnings": []
+    },
+    {
+      "id": "run_1782103368053_rjukrw",
+      "startedAt": "2026-06-22T04:42:48.053Z",
+      "finishedAt": "2026-06-22T04:43:20.388Z",
+      "status": "ok",
+      "source": "api",
+      "dataset": null,
+      "interval": "1h",
+      "chosenK": 3,
+      "storage": "local",
+      "opened": 0,
+      "settled": 0,
+      "skipped": [
+        {
+          "horizon": "1D",
+          "slug": "bitcoin-up-or-down-on-june-22-2026",
+          "reason": "already tracked"
+        },
+        {
+          "horizon": "4H",
+          "slug": "btc-updown-4h-1782100800",
+          "reason": "already tracked"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "id": "run_1782107823892_zs0zxu",
+      "startedAt": "2026-06-22T05:57:03.892Z",
+      "finishedAt": "2026-06-22T05:57:25.670Z",
+      "status": "ok",
+      "source": "local",
+      "dataset": "coinglass_BTC_regime_binance_5m_14d.csv",
+      "interval": "5m",
+      "chosenK": 4,
+      "storage": "local",
+      "opened": 0,
+      "settled": 0,
+      "skipped": [
+        {
+          "horizon": "1D",
+          "slug": "bitcoin-up-or-down-on-june-22-2026",
+          "reason": "already tracked"
+        },
+        {
+          "horizon": "4H",
+          "slug": "btc-updown-4h-1782100800",
+          "reason": "already tracked"
+        }
+      ],
+      "warnings": []
     }
   ],
-  "trades": []
+  "trades": [
+    {
+      "id": "bitcoin-up-or-down-on-june-22-2026:UP",
+      "status": "OPEN",
+      "runId": "run_1782103168783_7tf5sv",
+      "horizon": "1D",
+      "openedAt": "2026-06-22T04:39:53.261Z",
+      "marketSlug": "bitcoin-up-or-down-on-june-22-2026",
+      "title": "Bitcoin Up or Down on June 22?",
+      "frame": "1d",
+      "action": "BUY_UP",
+      "side": "UP",
+      "stakeUsd": 1,
+      "shares": 2.139838442197614,
+      "cost": 0.467325,
+      "maxBid": 0.450845094833512,
+      "edge": 0.03601931192395491,
+      "edgeUp": 0.03601931192395491,
+      "edgeDown": -0.080592311923955,
+      "impliedUp": 0.445,
+      "pUp": 0.5033443119239549,
+      "pDown": 0.4966556880760451,
+      "state": 0,
+      "stateLabel": "State 1",
+      "confidence": 0.972888717456849,
+      "entryTimestamp": "2026-06-22T04:35:00.000Z",
+      "entryMs": 1782102900000,
+      "startMs": 1782057600000,
+      "endMs": 1782144000000,
+      "startPrice": 64206.7,
+      "entryPrice": 63979.2,
+      "reason": "Model fair Up probability is above executable Up cost.",
+      "predictionDetails": {
+        "pUp": 0.5033443119239549,
+        "pDown": 0.4966556880760451,
+        "baselineP": 0.6636259977194983,
+        "stateP": 0.5695915529162081,
+        "trendP": 0.6683110847341931,
+        "neighborP": 0.05026615583021945,
+        "sampleSize": 861,
+        "stateCount": 503,
+        "trendCount": 53,
+        "weights": {
+          "state": 0.4883495145631068,
+          "neighbor": 0.1875,
+          "trend": 0.13766233766233768
+        },
+        "baseWeight": 0.1864881477745555,
+        "weightSum": 1,
+        "stateReliability": 0.9766990291262136,
+        "trendReliability": 0.6883116883116883,
+        "neighborReliability": 0.625,
+        "trendKey": "0|neg|neg",
+        "state": 0,
+        "stateLabel": "State 1",
+        "ci": {
+          "low": 0.522950412886457,
+          "high": 0.6092407884671809,
+          "width": 0.08629037558072383
+        },
+        "reason": "Regime sample is usable.",
+        "features": {
+          "distanceToStrike": -0.003543243929371857,
+          "priceRet24": -0.008248167375328134
+        },
+        "impliedUp": 0.445,
+        "cost": 0.467325,
+        "side": "UP",
+        "edge": 0.03601931192395491,
+        "kelly": 0.06761967789731999,
+        "positionFraction": 0.016904919474329996,
+        "feeRate": 0.07,
+        "upCost": 0.467325,
+        "downCost": 0.5772480000000001,
+        "edgeUp": 0.03601931192395491,
+        "edgeDown": -0.080592311923955
+      }
+    },
+    {
+      "id": "btc-updown-4h-1782100800:DOWN",
+      "status": "OPEN",
+      "runId": "run_1782103168783_7tf5sv",
+      "horizon": "4H",
+      "openedAt": "2026-06-22T04:39:53.261Z",
+      "marketSlug": "btc-updown-4h-1782100800",
+      "title": "Bitcoin Up or Down - June 22, 12:00AM-4:00AM ET",
+      "frame": "4h",
+      "action": "BUY_DOWN",
+      "side": "DOWN",
+      "stakeUsd": 1,
+      "shares": 1.9704705286575381,
+      "cost": 0.507493,
+      "maxBid": 0.5196870649788048,
+      "edge": 0.06433293740887835,
+      "edgeUp": -0.12921393740887838,
+      "edgeDown": 0.06433293740887835,
+      "impliedUp": 0.525,
+      "pUp": 0.4281740625911216,
+      "pDown": 0.5718259374088783,
+      "state": 0,
+      "stateLabel": "State 1",
+      "confidence": 0.972888717456849,
+      "entryTimestamp": "2026-06-22T04:35:00.000Z",
+      "entryMs": 1782102900000,
+      "startMs": 1782100800000,
+      "endMs": 1782115200000,
+      "startPrice": 63977.5,
+      "entryPrice": 63979.2,
+      "reason": "Model fair Down probability is above executable Down cost.",
+      "predictionDetails": {
+        "pUp": 0.4281740625911216,
+        "pDown": 0.5718259374088783,
+        "baselineP": 0.5102618542108988,
+        "stateP": 0.4862487858970974,
+        "trendP": 0.3083097223546025,
+        "neighborP": 0.31613404049832133,
+        "sampleSize": 4223,
+        "stateCount": 1681,
+        "trendCount": 126,
+        "weights": {
+          "state": 0.4964559952746604,
+          "neighbor": 0.1875,
+          "trend": 0.168
+        },
+        "baseWeight": 0.15,
+        "weightSum": 1.0019559952746604,
+        "stateReliability": 0.9929119905493208,
+        "trendReliability": 0.84,
+        "neighborReliability": 0.625,
+        "trendKey": "0|flat|neg",
+        "state": 0,
+        "stateLabel": "State 1",
+        "ci": {
+          "low": 0.46218624031108047,
+          "high": 0.509917962244222,
+          "width": 0.04773172193314157
+        },
+        "reason": "Regime sample is usable.",
+        "features": {
+          "distanceToStrike": 0.000026571841663039187,
+          "priceRet24": -0.008248167375328134
+        },
+        "impliedUp": 0.525,
+        "cost": 0.507493,
+        "side": "DOWN",
+        "edge": 0.06433293740887835,
+        "kelly": 0.1306233970458863,
+        "positionFraction": 0.032655849261471574,
+        "feeRate": 0.07,
+        "upCost": 0.557388,
+        "downCost": 0.507493,
+        "edgeUp": -0.12921393740887838,
+        "edgeDown": 0.06433293740887835
+      }
+    }
+  ]
 }

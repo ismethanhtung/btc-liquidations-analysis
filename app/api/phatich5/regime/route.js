@@ -3,6 +3,7 @@ import {
   buildPhatich4RegimeAnalysis,
   buildPhatich4RegimeAnalysisFromDataset,
   listPhatich4RegimeDatasets,
+  ensureDatasetUpToDate,
 } from "@/lib/phatich4-regime";
 
 export async function GET() {
@@ -43,6 +44,10 @@ export async function POST(req) {
       : Number(body.fitK);
     const hmmIterations = Number(body?.hmmIterations ?? 10);
     const selectedFeatures = Array.isArray(body?.selectedFeatures) ? body.selectedFeatures : null;
+
+    if (source === "local") {
+      await ensureDatasetUpToDate(body?.dataset);
+    }
 
     const result = source === "api"
       ? await buildPhatich4RegimeAnalysis({

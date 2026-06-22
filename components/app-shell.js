@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Database, FlaskConical, RefreshCcw, Search, Settings, Sun, Zap, Flame } from "lucide-react";
+import { Activity, Database, FlaskConical, RefreshCcw, Search, Settings, Sun, Zap, Flame, BookOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const navItems = [
@@ -15,6 +15,7 @@ const navItems = [
   { href: "/analysis-3", label: "Phan tich 3", icon: FlaskConical },
   { href: "/phatich4", label: "Phan tich 4", icon: FlaskConical },
   { href: "/phatich5", label: "Phan tich 5", icon: FlaskConical },
+  { href: "/poly-tutor", label: "Poly Tutor", icon: BookOpen },
   { href: "/settings", label: "Display", icon: Settings }
 ];
 

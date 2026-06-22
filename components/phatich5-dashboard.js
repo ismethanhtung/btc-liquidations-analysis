@@ -255,6 +255,59 @@ function computeDurationDependentRollout(currState, currentDuration, empiricalTr
   return { stateProbs };
 }
 
+function LivePaperLogsTab() {
+  const [logs, setLogs] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function loadLogs() {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/phatich5/live-paper/logs", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to load logs.");
+      setLogs(json.logs || "No log content.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadLogs();
+    const interval = setInterval(loadLogs, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="space-y-4 px-4 py-4 border border-[var(--border-color)] bg-[var(--bg-main)] rounded">
+      <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-2 mb-2">
+        <h2 className="text-[12px] font-semibold text-[var(--text-main)]">Runner / System Logs (cron.log)</h2>
+        <button
+          onClick={loadLogs}
+          disabled={loading}
+          className="inline-flex h-7 items-center justify-center gap-1 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 text-[10px] font-semibold hover:bg-[var(--border-color)] transition-colors rounded"
+        >
+          {loading && <span className="animate-spin inline-block mr-1">⌛</span>}
+          Refresh Logs
+        </button>
+      </div>
+
+      {error ? (
+        <div className="text-[11px] text-red-600 bg-red-50 border border-red-200 p-2 rounded">
+          {error}
+        </div>
+      ) : (
+        <pre className="font-mono text-[10px] leading-relaxed p-4 bg-slate-950 text-slate-100 rounded overflow-auto h-[60vh] thin-scrollbar whitespace-pre-wrap">
+          {logs}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 export default function Phatich5Dashboard() {
   const chartRef = useRef(null);
   const chartApiRef = useRef(null);
@@ -659,6 +712,7 @@ export default function Phatich5Dashboard() {
     { key: "radar", label: "Regime Radar" },
     { key: "polymarket", label: "Polymarket" },
     { key: "paper", label: "Paper Live" },
+    { key: "logs", label: "System Logs" },
   ];
 
   return (
@@ -1717,6 +1771,10 @@ export default function Phatich5Dashboard() {
 
             {activeTab === "paper" ? (
               <Phatich5LivePaperPanel />
+            ) : null}
+
+            {activeTab === "logs" ? (
+              <LivePaperLogsTab />
             ) : null}
 
           </div>
