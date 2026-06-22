@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-06-22T11:36:02.737Z",
+  "requested": {
+    "interval": "5m",
+    "days": 14,
+    "symbol": "BTCUSDT",
+    "startIso": "2026-06-07T11:40:00.000Z",
+    "endIso": "2026-06-22T11:35:00.000Z"
+  },
+  "merged": {
+    "rows": 4320,
+    "firstIso": "2026-06-07T11:40:00.000Z",
+    "lastIso": "2026-06-22T11:35:00.000Z"
+  }
+}

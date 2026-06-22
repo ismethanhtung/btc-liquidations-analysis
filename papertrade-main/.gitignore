@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+
+# Paper stats
+papertrade/paper_state/
+
+# IDE
+.idea/
+.vscode/
